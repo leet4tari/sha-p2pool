@@ -34,5 +34,8 @@ passthrough = [
 ]
 
 [target.x86_64-unknown-linux-gnu]
-image = "ubuntu:18.04"
+#image = "ubuntu:18.04"
+image.name = "ubuntu:18.04"
+# targetting is needed for apple silicon
+image.toolchain = ["linux/arm64=aarch64-unknown-linux-gnu", "linux/amd64=x86_64-unknown-linux-gnu"]
 pre-build = "./scripts/cross_compile_ubuntu_18-pre-build.sh"

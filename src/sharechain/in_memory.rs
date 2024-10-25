@@ -321,7 +321,7 @@ impl ShareChain for InMemoryShareChain {
             let missing_heights = missing_parents.iter().map(|data| data.0).collect::<Vec<u64>>();
             info!(target: LOG_TARGET, "Missing blocks for the following heights: {:?}", missing_heights);
         } else if let Err(e) = &res {
-            error!(target: LOG_TARGET, "Failed to add block (height {}): {}", height, e);
+            warn!(target: LOG_TARGET, "Failed to add block from submit (height {}): {}", height, e);
         }
         res
     }
@@ -357,7 +357,6 @@ impl ShareChain for InMemoryShareChain {
                     new_tip = tip_change;
                 },
                 Err(e) => {
-                    error!(target: LOG_TARGET, "Failed to add block (height {}): {}", height, e);
                     if let Error::BlockParentDoesNotExist {
                         missing_parents: new_missing_parents,
                     } = e
@@ -373,7 +372,7 @@ impl ShareChain for InMemoryShareChain {
 
                         info!(target: LOG_TARGET, "Missing blocks for the following heights: {:?}", missing_heights);
                     } else {
-                        error!(target: LOG_TARGET, "Failed to add block (height {}): {}", height, e);
+                        warn!(target: LOG_TARGET, "Failed to add block during sync (height {}): {}", height, e);
                         return Err(e);
                     }
                 },

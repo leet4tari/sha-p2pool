@@ -102,6 +102,7 @@ pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 
 const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
 const SYNC_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct Squad {
@@ -1267,6 +1268,7 @@ where S: ShareChain
                     return Ok(());
                 }
                 req = self.query_rx.recv() => {
+                    let timer = Instant::now();
                     dbg!("query");
                     match req {
                         Some(req) => {
@@ -1274,19 +1276,31 @@ where S: ShareChain
                     },
                     None => {
                          warn!(target: LOG_TARGET, "Failed to receive query from channel. Sender dropped?");
-                       todo!("Unimplemented");
                     }
-                }
+                                   }
+                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Query handling took too long: {:?}", timer.elapsed());
+                    }
+
                 },
 
                 blocks = self.client_broadcast_block_rx.recv() => {
+                    let timer = Instant::now();
                     dbg!("client broadcast");
                     self.broadcast_block(blocks).await;
+                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Client broadcast took too long: {:?}", timer.elapsed());
+                    }
                 },
                 event = self.swarm.select_next_some() => {
+                    let timer = Instant::now();
                     self.handle_event(event).await;
+                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Event handling took too long: {:?}", timer.elapsed());
+                    }
                  },
                 _ = publish_peer_info_interval.tick() => {
+                    let timer = Instant::now();
                     info!(target: LOG_TARGET, "pub peer info");
 
                     // broadcast peer info
@@ -1301,14 +1315,26 @@ where S: ShareChain
                             }
                         }
                     }
+
+                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Peer info publishing took too long: {:?}", timer.elapsed());
+                    }
                 },
                 _ = sync_interval.tick() =>  {
+                    let timer = Instant::now();
                     if self.config.sync_job_enabled {
                         self.try_sync_from_best_peer().await;
                     }
+                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Syncing took too long: {:?}", timer.elapsed());
+                    }
                 }
                 _ = grey_list_clear_interval.tick() => {
+                    let timer = Instant::now();
                     self.network_peer_store.clear_grey_list();
+                    if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
+                        warn!(target: LOG_TARGET, "Clearing grey list took too long: {:?}", timer.elapsed());
+                    }
                 },
                 _ = debug_chain_graph.tick() => {
                  if self.config.debug_print_chain {

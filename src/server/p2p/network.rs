@@ -417,7 +417,7 @@ where S: ShareChain
                             StreamProtocol::new(CATCH_UP_SYNC_REQUEST_RESPONSE_PROTOCOL),
                             request_response::ProtocolSupport::Full,
                         )],
-                        request_response::Config::default().with_request_timeout(Duration::from_secs(30)), // 10 is the default
+                        request_response::Config::default().with_request_timeout(Duration::from_secs(90)), // 10 is the default
                     ),
                     kademlia: kad::Behaviour::new(
                         key_pair.public().to_peer_id(),
@@ -537,7 +537,7 @@ where S: ShareChain
     fn network_topic(topic: &str) -> String {
         let network = Network::get_current_or_user_setting_or_default().as_key_str();
         let chain_id = CURRENT_CHAIN_ID.clone();
-        format!("{network}_{chain_id}_{topic}")
+        format!("{network}_{chain_id}_{topic}_{PROTOCOL_VERSION}")
     }
 
     /// Generates a gossip sub topic name based on the current Tari network to avoid mixing up
@@ -545,7 +545,7 @@ where S: ShareChain
     fn squad_topic(squad: &Squad, topic: &str) -> String {
         let network = Network::get_current_or_user_setting_or_default().as_key_str();
         let chain_id = CURRENT_CHAIN_ID.clone();
-        format!("{network}_{chain_id}_{squad}_{topic}")
+        format!("{network}_{chain_id}_{squad}_{topic}_{PROTOCOL_VERSION}")
     }
 
     /// Subscribing to a gossipsub topic.
@@ -1158,6 +1158,7 @@ where S: ShareChain
         if blocks.is_empty() {
             return;
         }
+        let last_block_from_them = blocks.last().map(|b| (b.height, b.hash.clone()));
         match share_chain.add_synced_blocks(&blocks).await {
             Ok(result) => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Synced blocks added to share chain: {result:?}");
@@ -1169,7 +1170,7 @@ where S: ShareChain
                     dbg!(their_tip_hash);
                     dbg!(share_chain.get_tip().await);
                     self.network_peer_store.add_catch_up_attempt(&peer);
-                    match self.perform_catch_up_sync(algo, peer).await {
+                    match self.perform_catch_up_sync(algo, peer, last_block_from_them).await {
                         Ok(_) => {},
                         Err(error) => {
                             error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to perform catch up sync: {error:?}");
@@ -1247,7 +1248,7 @@ where S: ShareChain
         // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
     }
 
-    async fn perform_catch_up_sync(&mut self, algo: PowAlgorithm, peer: PeerId)-> Result<(), Error> {
+    async fn perform_catch_up_sync(&mut self, algo: PowAlgorithm, peer: PeerId, last_block_from_them: Option<(u64, FixedHash)>)-> Result<(), Error> {
         let share_chain = match algo {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
@@ -1271,6 +1272,10 @@ where S: ShareChain
                     break;
                 }
             }
+        }
+
+        if let Some(last_block_synced) = last_block_from_them {
+            i_have_blocks.push(last_block_synced);
         }
 
         info!(target: SYNC_REQUEST_LOG_TARGET, "Sending catch up sync to {} for blocks {}", peer, i_have_blocks.iter().map(|a| a.0.to_string()).join(", "));
@@ -1555,7 +1560,9 @@ where S: ShareChain
                     PowAlgorithm::Sha3x => record.peer_info.current_sha3x_height,
                 };
                 if their_height > our_tip {
-                        self.perform_catch_up_sync(*algo, record.peer_id).await;
+                        let _ = self.perform_catch_up_sync(*algo, record.peer_id, None).await.inspect_err(|e| 
+                            warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to perform catch up sync: {}", e)
+                        );
                 }
             }
         }

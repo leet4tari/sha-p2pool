@@ -62,10 +62,7 @@ impl InMemoryShareChain {
         }
 
         Ok(Self {
-            p2_chain: Arc::new(RwLock::new(P2Chain::new_empty(
-                MAX_BLOCKS_COUNT,
-                SHARE_WINDOW,
-            ))),
+            p2_chain: Arc::new(RwLock::new(P2Chain::new_empty(MAX_BLOCKS_COUNT, SHARE_WINDOW))),
             pow_algo,
             block_validation_params,
             consensus_manager,
@@ -583,6 +580,10 @@ impl ShareChain for InMemoryShareChain {
         // Assume their blocks are in order highest first.
         let mut split_height = 0;
 
+        let mut their_blocks = their_blocks.to_vec();
+        their_blocks.sort_by(|a, b| b.0.cmp(&a.0));
+        their_blocks.reverse();
+
         // Go back and find the split in the chain
         for their_block in their_blocks {
             if let Some(level) = p2_chain_read.level_at_height(their_block.0) {
@@ -697,7 +698,7 @@ impl ShareChain for InMemoryShareChain {
         let skip = page * page_size;
         let mut num_skipped = 0;
         // TODO: This is very inefficient, we should refactor this.
-        for level in &chain_read_lock.levels {
+        for level in chain_read_lock.levels.iter().rev() {
             if level.height < start_height.unwrap_or(0) {
                 continue;
             }

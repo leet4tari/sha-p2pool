@@ -54,11 +54,10 @@ use log::{
     trace,
     warn,
 };
-use minotari_app_grpc::conversions::peer;
 use serde::{de, Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_core::proof_of_work::PowAlgorithm;
+use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::hex::Hex;
 use tokio::{
@@ -480,9 +479,13 @@ where S: ShareChain
         let share_chain_random_x = self.share_chain_random_x.clone();
         let current_height_sha3x = share_chain_sha3x.tip_height().await.map_err(Error::ShareChain)?;
         let current_height_random_x = share_chain_random_x.tip_height().await.map_err(Error::ShareChain)?;
+        let current_pow_sha3x = share_chain_sha3x.chain_pow().await.as_u128();
+        let current_pow_random_x = share_chain_random_x.chain_pow().await.as_u128();
         let peer_info_squad_raw = PeerInfo::new(
             current_height_sha3x,
             current_height_random_x,
+            current_pow_sha3x,
+            current_pow_random_x,
             self.config.squad.as_string(),
             public_addresses,
             Some(self.config.user_agent.clone()),
@@ -1569,20 +1572,33 @@ where S: ShareChain
             let best_peers = self
                 .network_peer_store
                 .best_peers_to_sync(self.config.num_peers_to_sync, *algo);
-            let our_tip = match algo {
-                PowAlgorithm::RandomX => self.share_chain_random_x.tip_height().await.unwrap_or_default(),
-                PowAlgorithm::Sha3x => self.share_chain_sha3x.tip_height().await.unwrap_or_default(),
+            let (our_tip, our_pow) = match algo {
+                PowAlgorithm::RandomX => (
+                    self.share_chain_random_x.tip_height().await.unwrap_or_default(),
+                    self.share_chain_random_x.chain_pow().await,
+                ),
+                PowAlgorithm::Sha3x => (
+                    self.share_chain_sha3x.tip_height().await.unwrap_or_default(),
+                    self.share_chain_sha3x.chain_pow().await,
+                ),
             };
 
             // info!(target: LOG_TARGET, squad = &self.config.squad; "Best peers to sync: {best_peers:?}");
 
             for record in best_peers {
-                info!(target: LOG_TARGET, squad = &self.config.squad; "Trying to sync from peer: {} rx:{} sha:{}", record.peer_id, record.peer_info.current_random_x_height, record.peer_info.current_sha3x_height );
-                let their_height = match algo {
-                    PowAlgorithm::RandomX => record.peer_info.current_random_x_height,
-                    PowAlgorithm::Sha3x => record.peer_info.current_sha3x_height,
+                let (their_height, their_pow) = match algo {
+                    PowAlgorithm::RandomX => (
+                        record.peer_info.current_random_x_height,
+                        AccumulatedDifficulty::from_u128(record.peer_info.current_random_x_pow).unwrap_or_default(),
+                    ),
+                    PowAlgorithm::Sha3x => (
+                        record.peer_info.current_sha3x_height,
+                        AccumulatedDifficulty::from_u128(record.peer_info.current_sha3x_pow).unwrap_or_default(),
+                    ),
                 };
-                if their_height > our_tip {
+           if their_pow > our_pow {
+                    info!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}] Trying to sync from peer: {} with height{}", algo,record.peer_id, their_height);
+
                     let _ = self.perform_catch_up_sync(*algo, record.peer_id, None).await.inspect_err(|e|
                             warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to perform catch up sync: {}", e)
                         );

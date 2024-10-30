@@ -949,6 +949,32 @@ where S: ShareChain
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Listening on {address:?}");
             },
+            SwarmEvent::ConnectionClosed {
+                peer_id,
+                connection_id,
+                endpoint,
+                num_established,
+                cause,
+            } => {
+                // Ignore dials where we can't get hold of the person
+                if !endpoint.is_dialer() {
+                    warn!(target: LOG_TARGET, squad = &self.config.squad; "Connection closed: {peer_id:?} -> {endpoint:?} ({num_established:?}) -> {cause:?}");
+                }
+            },
+            SwarmEvent::IncomingConnectionError {
+                connection_id,
+                local_addr,
+                send_back_addr,
+                error,
+            } => {
+                error!(target: LOG_TARGET, squad = &self.config.squad; "Incoming connection error: {connection_id:?} -> {local_addr:?} -> {send_back_addr:?} -> {error:?}");
+            },
+            SwarmEvent::ListenerError { listener_id, error } => {
+                error!(target: LOG_TARGET, squad = &self.config.squad; "Listener error: {listener_id:?} -> {error:?}");
+            },
+            SwarmEvent::ExternalAddrExpired { address, .. } => {
+                warn!(target: LOG_TARGET, squad = &self.config.squad; "External address has expired: {address:?}. TODO: Do we need to create a new one?");
+            },
             SwarmEvent::Behaviour(event) => match event {
                 ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
                     mdns::Event::Discovered(peers) => {
@@ -1124,7 +1150,10 @@ where S: ShareChain
             PowAlgorithm::Sha3x => &self.share_chain_sha3x,
         };
 
-        let blocks = match share_chare.request_sync(request.i_have(), 20).await {
+        let blocks = match share_chare
+            .request_sync(request.i_have(), 20, request.last_block_received())
+            .await
+        {
             Ok(blocks) => blocks,
             Err(error) => {
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to get blocks from height: {error:?}");
@@ -1300,16 +1329,16 @@ where S: ShareChain
             }
         }
 
-        if let Some(last_block_synced) = last_block_from_them {
-            i_have_blocks.push(last_block_synced);
-        }
+        // if let Some(last_block_synced) = last_block_from_them {
+        // i_have_blocks.push(last_block_synced);
+        // }
 
-        info!(target: SYNC_REQUEST_LOG_TARGET, "Sending catch up sync to {} for blocks {}", peer, i_have_blocks.iter().map(|a| a.0.to_string()).join(", "));
+        info!(target: SYNC_REQUEST_LOG_TARGET, "Sending catch up sync to {} for blocks {}, last block received {}", peer, i_have_blocks.iter().map(|a| a.0.to_string()).join(", "), last_block_from_them.map(|a| a.0.to_string()).unwrap_or_else(|| "None".to_string()));
 
-        self.swarm
-            .behaviour_mut()
-            .catch_up_sync
-            .send_request(&peer, CatchUpSyncRequest::new(algo, i_have_blocks));
+        self.swarm.behaviour_mut().catch_up_sync.send_request(
+            &peer,
+            CatchUpSyncRequest::new(algo, i_have_blocks, last_block_from_them),
+        );
 
         Ok(())
     }
@@ -1467,7 +1496,7 @@ where S: ShareChain
 
         loop {
             select! {
-                biased;
+                // biased;
                 _ = &mut shutdown_signal => {
                     info!(target: LOG_TARGET,"Shutting down p2p service...");
                     return Ok(());
@@ -1596,7 +1625,7 @@ where S: ShareChain
                         AccumulatedDifficulty::from_u128(record.peer_info.current_sha3x_pow).unwrap_or_default(),
                     ),
                 };
-           if their_pow > our_pow {
+                if their_pow > our_pow {
                     info!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}] Trying to sync from peer: {} with height{}", algo,record.peer_id, their_height);
 
                     let _ = self.perform_catch_up_sync(*algo, record.peer_id, None).await.inspect_err(|e|

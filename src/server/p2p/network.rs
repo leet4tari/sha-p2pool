@@ -437,7 +437,9 @@ where S: ShareChain
                 })
             })
             .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
-            .with_swarm_config(|c| c.with_idle_connection_timeout(config.idle_connection_timeout))
+            // In most cases libp2p will keep connections open that we need. Setting this higher 
+            // will make us keep connections open that we don't need.
+            // .with_swarm_config(|c| c.with_idle_connection_timeout(config.idle_connection_timeout))
             .build();
 
         dbg!("Check if we must set the kademlia mode");
@@ -651,7 +653,7 @@ where S: ShareChain
                             debug!(target: MESSAGE_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {peer:?} -> {payload:?}");
 
                             // If we don't have this peer, try do peer exchange
-                            if self.network_peer_store.exists(&peer) {
+                            if !self.network_peer_store.exists(&peer) {
                                 self.initiate_direct_peer_exchange(peer).await;
                             }
 
@@ -776,6 +778,11 @@ where S: ShareChain
         channel: ResponseChannel<DirectPeerInfoResponse>,
         request: DirectPeerInfoRequest,
     ) {
+        if request.info.version != PROTOCOL_VERSION {
+            debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", request.peer_id);
+            return;
+        }
+
         let local_peer_id = self.swarm.local_peer_id().clone();
         if let Ok(info) = self
             .create_peer_info(self.swarm.external_addresses().cloned().collect())

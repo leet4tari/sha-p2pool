@@ -658,9 +658,9 @@ where S: ShareChain
 
     /// Subscribes to all topics we need.
     async fn subscribe_to_topics(&mut self) {
-        if self.config.is_seed_peer {
-            return;
-        }
+        // if self.config.is_seed_peer {
+        //     return;
+        // }
         self.subscribe(PEER_INFO_TOPIC, true);
         self.subscribe(BLOCK_NOTIFY_TOPIC, true);
     }
@@ -1495,16 +1495,14 @@ where S: ShareChain
             return;
         }
 
-        dbg!(&info);
-
-        if self.swarm.external_addresses().count() > 0 {
-            debug!(target: LOG_TARGET, "No need to relay, we have an external address already. {}", self.swarm.external_addresses().map(|a| a.to_string()).collect::<Vec<String>>().join(", "));
-            // Check if we can relay
-            // warn!(target: LOG_TARGET, "No external addresses");
-            // self.swarm.add_external_address(info.observed_addr.clone());
-            // info!(target: LOG_TARGET, "We have an external address already, no need to relay.");
-            return;
-        }
+        // if self.swarm.external_addresses().count() > 0 {
+        //     debug!(target: LOG_TARGET, "No need to relay, we have an external address already. {}",
+        // self.swarm.external_addresses().map(|a| a.to_string()).collect::<Vec<String>>().join(", "));     // Check
+        // if we can relay     // warn!(target: LOG_TARGET, "No external addresses");
+        //     // self.swarm.add_external_address(info.observed_addr.clone());
+        //     // info!(target: LOG_TARGET, "We have an external address already, no need to relay.");
+        //     return;
+        // }
 
         if self.config.is_seed_peer {
             return;
@@ -2196,7 +2194,11 @@ where S: ShareChain
     async fn join_seed_peers(&mut self, seed_peers: HashMap<PeerId, Multiaddr>) -> Result<(), Error> {
         seed_peers.iter().for_each(|(peer_id, addr)| {
             info!(target: LOG_TARGET, squad = &self.config.squad; "Adding seed peer: {:?} -> {:?}", peer_id, addr);
-            self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
+            // self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
+            self.swarm.add_peer_address(peer_id.clone(), addr.clone());
+            let _ = self.swarm.dial(peer_id.clone()).inspect_err(|e| {
+                warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to dial seed peer: {e:?}");
+            });
         });
 
         if !seed_peers.is_empty() {

@@ -40,7 +40,7 @@ impl Default for Config {
             http_server: http::server::Config::default(),
             max_incoming_connections: Some(100),
             max_outgoing_connections: Some(16),
-            network_silence_delay: 0,
+            network_silence_delay: 300,
         }
     }
 }

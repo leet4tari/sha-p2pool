@@ -195,7 +195,7 @@ impl Default for Config {
             relay_server_enabled: false,
             squad: Squad::from("default".to_string()),
             user_agent: "tari-p2pool".to_string(),
-            grey_list_clear_interval: Duration::from_secs(20 * 60),
+            grey_list_clear_interval: Duration::from_secs(60),
             sync_interval: Duration::from_secs(10),
             is_seed_peer: false,
             debug_print_chain: false,
@@ -1299,19 +1299,26 @@ where S: ShareChain
                         request_response::Event::OutboundFailure { peer, error, .. } => {
                             // Peers can be offline
                             debug!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES outbound failure: {peer:?} -> {error:?}");
+                            let mut should_grey_list = true;
                             match error {
                                 OutboundFailure::DialFailure => {
                                     debug!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                                },
+                                OutboundFailure::ConnectionClosed => {
+                                    // I think it might upgrade to a DCTUR so no need to grey list
+                                    debug!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
+                                    self.network_peer_store.reset_last_sync_attempt(&peer);
+                                    should_grey_list = false;
                                 },
                                 _ => {
                                     warn!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync request failed: {peer:?} -> {error:?}");
                                 },
                             }
-                            // Unlock the permit
-                            self.network_peer_store
-                                .move_to_grey_list(peer, format!("Error during catch up sync:{}", error))
-                                .await;
-
+                            if should_grey_list {
+                                self.network_peer_store
+                                    .move_to_grey_list(peer, format!("Error during catch up sync:{}", error))
+                                    .await;
+                            }
                             // Remove peer from peer store to try to sync from another peer,
                             // if the peer goes online/accessible again, the peer store will have it again.
                             // self.network_peer_store.remove(&peer).await;
@@ -1333,13 +1340,13 @@ where S: ShareChain
                     _ => {},
                 },
                 ServerNetworkBehaviourEvent::RelayServer(event) => {
-                    debug!(target: LOG_TARGET, "[RELAY SERVER]: {event:?}");
+                    info!(target: LOG_TARGET, "[RELAY SERVER]: {event:?}");
                 },
                 ServerNetworkBehaviourEvent::RelayClient(event) => {
-                    debug!(target: LOG_TARGET, "[RELAY CLIENT]: {event:?}");
+                    info!(target: LOG_TARGET, "[RELAY CLIENT]: {event:?}");
                 },
                 ServerNetworkBehaviourEvent::Dcutr(event) => {
-                    debug!(target: LOG_TARGET, "[DCUTR]: {event:?}");
+                    info!(target: LOG_TARGET, "[DCUTR]: {event:?}");
                 },
                 ServerNetworkBehaviourEvent::Autonat(event) => self.handle_autonat_event(event).await,
                 ServerNetworkBehaviourEvent::PeerSync(event) => {
@@ -2202,6 +2209,7 @@ where S: ShareChain
             info!(target: LOG_TARGET, squad = &self.config.squad; "Adding seed peer: {:?} -> {:?}", peer_id, addr);
             // self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
             self.swarm.add_peer_address(peer_id.clone(), addr.clone());
+            self.network_peer_store.add_seed_peer(peer_id.clone());
             let _ = self.swarm.dial(peer_id.clone()).inspect_err(|e| {
                 warn!(target: LOG_TARGET, squad = &self.config.squad; "Failed to dial seed peer: {e:?}");
             });

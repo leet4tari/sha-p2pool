@@ -78,7 +78,7 @@ where S: ShareChain
         let randomx_factory = RandomXFactory::new(1);
         let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;
         let genesis_block_hash = *consensus_manager.get_genesis_block().hash();
-        if config.mining_enabled {
+        if !config.p2p_service.is_seed_peer {
             let base_node_grpc_service =
                 TariBaseNodeGrpc::new(config.base_node_address.clone(), shutdown_signal.clone()).await?;
             base_node_grpc_server = Some(BaseNodeServer::new(base_node_grpc_service));
@@ -160,7 +160,7 @@ where S: ShareChain
             sync_start.store(true, std::sync::atomic::Ordering::Relaxed);
         });
 
-        if self.config.mining_enabled {
+        if self.config.p2p_service.is_seed_peer {
             // local base node and p2pool node grpc services
             let base_node_grpc_service = self.base_node_grpc_service.clone().unwrap();
             let p2pool_grpc_service = self.p2pool_grpc_service.clone().unwrap();

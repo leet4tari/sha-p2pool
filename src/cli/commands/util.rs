@@ -90,10 +90,9 @@ pub async fn server(
         config_builder.with_external_address(external_ip);
     }
 
-    config_builder.with_mining_enabled(!args.mining_disabled);
-    config_builder.with_is_seed_peer(args.mining_disabled);
+    config_builder.with_is_seed_peer(args.is_seed_peer);
     config_builder.with_mdns_enabled(!args.mdns_disabled);
-    config_builder.with_relay_enabled(args.relay_server_enabled);
+    config_builder.with_relay_disabled(args.relay_server_disabled);
     config_builder.with_http_server_enabled(!args.http_server_disabled);
     config_builder.with_user_agent(
         args.user_agent

@@ -13,7 +13,7 @@ use crate::cli::{
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Parser, Debug)]
-pub struct StartArgs {
+pub(crate) struct StartArgs {
     /// (Optional) base dir.
     #[arg(short, long, value_name = "base-dir")]
     base_dir: Option<PathBuf>,
@@ -81,13 +81,8 @@ pub struct StartArgs {
     )]
     pub private_key_folder: PathBuf,
 
-    /// Mining disabled
-    ///
-    /// In case it is set, the node will only handle p2p operations,
-    /// will be syncing with share chain, but not starting gRPC services and no Tari base node needed.
-    /// By setting this it can be used as a stable node for routing only.
-    #[arg(long, value_name = "mining-disabled", default_value_t = false)]
-    pub mining_disabled: bool,
+    #[arg(long, default_value_t = false)]
+    pub is_seed_peer: bool,
 
     /// mDNS disabled
     ///
@@ -95,12 +90,10 @@ pub struct StartArgs {
     #[arg(long, value_name = "mdns-disabled", default_value_t = false)]
     pub mdns_disabled: bool,
 
-    /// Relay Server Enabled
-    ///
-    /// If set, this peer acts as a relay server too for other peers to exchange
-    /// messages between each other.
-    #[arg(long, value_name = "relay-server-enabled", default_value_t = false)]
-    pub relay_server_enabled: bool,
+    /// Relay Server  - Default is set to false. If the node
+    /// has an external address, it will relay
+    #[arg(long, value_name = "relay-server-disabled", default_value_t = false)]
+    pub relay_server_disabled: bool,
 
     /// HTTP server disabled
     ///

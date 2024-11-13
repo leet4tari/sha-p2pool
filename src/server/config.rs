@@ -20,7 +20,6 @@ pub struct Config {
     pub idle_connection_timeout: Duration,
     pub peer_store: PeerStoreConfig,
     pub p2p_service: p2p::Config,
-    pub mining_enabled: bool,
     pub http_server: http::server::Config,
     pub max_incoming_connections: Option<u32>,
     pub max_outgoing_connections: Option<u32>,
@@ -36,7 +35,6 @@ impl Default for Config {
             idle_connection_timeout: Duration::from_secs(60),
             peer_store: PeerStoreConfig::default(),
             p2p_service: p2p::Config::default(),
-            mining_enabled: true,
             http_server: http::server::Config::default(),
             max_incoming_connections: Some(100),
             max_outgoing_connections: Some(16),
@@ -129,11 +127,6 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn with_mining_enabled(&mut self, config: bool) -> &mut Self {
-        self.config.mining_enabled = config;
-        self
-    }
-
     pub fn with_is_seed_peer(&mut self, config: bool) -> &mut Self {
         self.config.p2p_service.is_seed_peer = config;
         self
@@ -144,8 +137,8 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn with_relay_enabled(&mut self, config: bool) -> &mut Self {
-        self.config.p2p_service.relay_server_enabled = config;
+    pub fn with_relay_disabled(&mut self, config: bool) -> &mut Self {
+        self.config.p2p_service.relay_server_disabled = config;
         self
     }
 

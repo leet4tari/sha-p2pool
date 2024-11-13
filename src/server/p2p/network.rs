@@ -127,7 +127,7 @@ const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
 const MAX_CATCH_UP_ATTEMPTS: usize = 150;
 // Time to start up and catch up before we start processing new tip messages
 const STARTUP_CATCH_UP_TIME: Duration = Duration::from_secs(1);
-const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 8;
+const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct Squad {
@@ -165,7 +165,7 @@ impl Display for Squad {
 }
 
 #[derive(Clone, Debug)]
-pub struct Config {
+pub(crate) struct Config {
     pub external_addr: Option<String>,
     pub seed_peers: Vec<String>,
     pub peer_info_publish_interval: Duration,
@@ -173,7 +173,7 @@ pub struct Config {
     pub private_key_folder: PathBuf,
     pub private_key: Option<Keypair>,
     pub mdns_enabled: bool,
-    pub relay_server_enabled: bool,
+    pub relay_server_disabled: bool,
     pub squad: Squad,
     pub user_agent: String,
     pub grey_list_clear_interval: Duration,
@@ -199,7 +199,7 @@ impl Default for Config {
             private_key_folder: PathBuf::from("."),
             private_key: None,
             mdns_enabled: false,
-            relay_server_enabled: false,
+            relay_server_disabled: false,
             squad: Squad::from("default".to_string()),
             user_agent: "tari-p2pool".to_string(),
             grey_list_clear_interval: Duration::from_secs(60),
@@ -257,7 +257,7 @@ pub struct ServerNetworkBehaviour {
     // pub kademlia: kad::Behaviour<MemoryStore>,
     pub peer_sync: libp2p_peersync::Behaviour<libp2p_peersync::store::MemoryPeerStore>,
     pub identify: identify::Behaviour,
-    pub relay_server: relay::Behaviour,
+    pub relay_server: Toggle<relay::Behaviour>,
     pub relay_client: relay::client::Behaviour,
     pub dcutr: dcutr::Behaviour,
     pub autonat: autonat::Behaviour,
@@ -614,6 +614,8 @@ where S: ShareChain
                             }
                             info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> {payload:?}");
 
+                            self.network_peer_store
+                                .add_last_new_tip_notify(&source_peer, payload.clone());
                             let _ = self.swarm
                                 .behaviour_mut()
                                 .peer_sync
@@ -728,6 +730,8 @@ where S: ShareChain
         match add_status {
             AddPeerStatus::NewPeer => {
                 self.initiate_direct_peer_exchange(&peer).await;
+                self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                let _ = self.swarm.dial(peer);
                 return true;
             },
             AddPeerStatus::Existing => {},
@@ -757,10 +761,10 @@ where S: ShareChain
 
             let mut my_best_peers = self
                 .network_peer_store
-                .best_peers_to_sync(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::RandomX);
+                .best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::RandomX);
             my_best_peers.extend(
                 self.network_peer_store
-                    .best_peers_to_sync(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::Sha3x),
+                    .best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::Sha3x),
             );
 
             let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
@@ -799,10 +803,10 @@ where S: ShareChain
         {
             let mut my_best_peers = self
                 .network_peer_store
-                .best_peers_to_sync(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::RandomX);
+                .best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::RandomX);
             my_best_peers.extend(
                 self.network_peer_store
-                    .best_peers_to_sync(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::Sha3x),
+                    .best_peers_to_share(NUM_PEERS_TO_SYNC_PER_ALGO, PowAlgorithm::Sha3x),
             );
             let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
             if self
@@ -852,6 +856,11 @@ where S: ShareChain
                     if let Some(peer_id) = peer.peer_id {
                         self.add_peer(peer, peer_id).await;
                     }
+                }
+                // Once we have peer info from the seed peers, disconnect from them.
+                if self.network_peer_store.is_seed_peer(&peer_id) {
+                    warn!(target: LOG_TARGET, squad = &self.config.squad; "Disconnecting from seed peer {}", peer_id);
+                    let _ = self.swarm.disconnect_peer_id(peer_id.clone());
                 }
             },
             Err(error) => {

@@ -7,6 +7,7 @@ use std::{
     io::{BufReader, Write},
     path::Path,
     str::FromStr,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -16,6 +17,7 @@ use log::warn;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_utilities::epoch_time::EpochTime;
 
+use super::messages::NotifyNewTipBlock;
 use crate::server::{http::stats_collector::StatsBroadcastClient, p2p::messages::PeerInfo, PROTOCOL_VERSION};
 
 const LOG_TARGET: &str = "tari::p2pool::peer_store";
@@ -47,6 +49,7 @@ pub(crate) struct PeerStoreRecord {
     pub num_grey_listings: u64,
     pub last_grey_list_reason: Option<String>,
     pub catch_up_attempts: u64,
+    pub last_new_tip_notify: Option<Arc<NotifyNewTipBlock>>,
 }
 
 impl PeerStoreRecord {
@@ -60,6 +63,7 @@ impl PeerStoreRecord {
             created: Instant::now(),
             last_grey_list_reason: None,
             catch_up_attempts: 0,
+            last_new_tip_notify: None,
         }
     }
 
@@ -115,10 +119,27 @@ impl PeerStore {
         self.seed_peers.push(peer_id);
     }
 
+    pub fn is_seed_peer(&self, peer_id: &PeerId) -> bool {
+        self.seed_peers.contains(peer_id)
+    }
+
     pub fn num_catch_ups(&self, peer: &PeerId) -> Option<usize> {
         self.whitelist_peers
             .get(&peer.to_base58())
             .map(|record| record.catch_up_attempts as usize)
+    }
+
+    pub fn add_last_new_tip_notify(&mut self, peer_id: &PeerId, notify: Arc<NotifyNewTipBlock>) {
+        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
+            let mut new_record = entry.clone();
+            new_record.last_new_tip_notify = Some(notify.clone());
+            *entry = new_record;
+        }
+        if let Some(entry) = self.greylist_peers.get_mut(&peer_id.to_base58()) {
+            let mut new_record = entry.clone();
+            new_record.last_new_tip_notify = Some(notify);
+            *entry = new_record;
+        }
     }
 
     pub fn add_catch_up_attempt(&mut self, peer_id: &PeerId) {
@@ -151,11 +172,46 @@ impl PeerStore {
         &self.greylist_peers
     }
 
+    pub fn best_peers_to_share(&self, count: usize, algo: PowAlgorithm) -> Vec<PeerStoreRecord> {
+        let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
+        // ignore all peers records that are older than 10 minutes
+        let timestamp = EpochTime::now().as_u64() - 600;
+        peers.retain(|peer| {
+            peer.last_new_tip_notify
+                .as_ref()
+                .map(|n| n.timestamp)
+                .unwrap_or(peer.peer_info.timestamp) >
+                timestamp
+        });
+        match algo {
+            PowAlgorithm::RandomX => {
+                peers.sort_by(|a, b| {
+                    a.peer_info
+                        .current_random_x_height
+                        .cmp(&b.peer_info.current_random_x_height)
+                });
+            },
+
+            PowAlgorithm::Sha3x => {
+                peers.sort_by(|a, b| a.peer_info.current_sha3x_height.cmp(&b.peer_info.current_sha3x_height));
+            },
+        }
+        peers.reverse();
+        peers.truncate(count);
+        peers.into_iter().cloned().collect()
+    }
+
     pub fn best_peers_to_sync(&self, count: usize, algo: PowAlgorithm) -> Vec<PeerStoreRecord> {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
         // ignore all peers records that are older than 1 minutes
         let timestamp = EpochTime::now().as_u64() - 60;
-        peers.retain(|peer| peer.peer_info.timestamp > timestamp);
+        peers.retain(|peer| {
+            peer.last_new_tip_notify
+                .as_ref()
+                .map(|n| n.timestamp)
+                .unwrap_or(peer.peer_info.timestamp) >
+                timestamp
+        });
         match algo {
             PowAlgorithm::RandomX => {
                 peers.sort_by(|a, b| {

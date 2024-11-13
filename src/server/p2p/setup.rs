@@ -119,9 +119,13 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
     let peer_sync =
     libp2p_peersync::Behaviour::new(key_pair.clone(), MemoryPeerStore::new(), libp2p_peersync::Config::default());
 
-            let relay_server = relay::Behaviour::new(key_pair.public().to_peer_id(),
+            let relay_server = if config.p2p_service.relay_server_disabled {
+                Toggle::from(None)
+            } else {
+                Toggle::from(Some(relay::Behaviour::new(key_pair.public().to_peer_id(),
             relay_config.reservation_rate_per_ip(NonZeroU32::new(600).expect("can't fail"), Duration::from_secs(60))
-            );
+            )))
+        };
 
             Ok(ServerNetworkBehaviour {
                 gossipsub,

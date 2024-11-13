@@ -559,14 +559,16 @@ where S: ShareChain
                             }
                             debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[SQUAD_PEERINFO_TOPIC] New peer info: {source_peer:?} -> {payload:?}");
 
-                            if !self.config.is_seed_peer && self.add_peer(payload, source_peer).await {
-                                let _= self.swarm
+                            if self.add_peer(payload, source_peer).await {
+                                if !self.config.is_seed_peer {
+                                    let _= self.swarm
                                     .behaviour_mut()
                                     .peer_sync
                                     .add_want_peers(vec![source_peer.clone()]).await.inspect_err(|e| {
                                         error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers: {e:?}");
                                     });
-                                self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&source_peer);
+                                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&source_peer);
+                                }
                             }
                             return Ok(MessageAcceptance::Accept);
                         },

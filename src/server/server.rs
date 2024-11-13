@@ -160,7 +160,7 @@ where S: ShareChain
             sync_start.store(true, std::sync::atomic::Ordering::Relaxed);
         });
 
-        if self.config.p2p_service.is_seed_peer {
+        if !self.config.p2p_service.is_seed_peer {
             // local base node and p2pool node grpc services
             let base_node_grpc_service = self.base_node_grpc_service.clone().unwrap();
             let p2pool_grpc_service = self.p2pool_grpc_service.clone().unwrap();

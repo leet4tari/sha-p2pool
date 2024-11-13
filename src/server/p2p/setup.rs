@@ -112,7 +112,6 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
 
             // relay server
       let relay_config =  relay::Config{
-        max_reservations: if config.p2p_service.is_seed_peer {  1024 } else { 512 },
         ..Default::default()
     };
 

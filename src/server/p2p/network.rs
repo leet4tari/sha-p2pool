@@ -13,6 +13,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use anyhow::{anyhow, Error};
 use blake2::Blake2b;
 use convert_case::{Case, Casing};
 use digest::{consts::U32, generic_array::GenericArray, Digest};
@@ -32,6 +33,7 @@ use libp2p::{
     mdns::{self, tokio::Tokio},
     multiaddr::Protocol,
     noise,
+    ping,
     relay,
     request_response::{self, cbor, OutboundFailure, ResponseChannel},
     swarm::{
@@ -93,8 +95,6 @@ use crate::{
             messages::{self, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
             peer_store::{AddPeerStatus, PeerStore},
             relay_store::RelayStore,
-            Error,
-            LibP2PError,
         },
         PROTOCOL_VERSION,
     },
@@ -258,6 +258,7 @@ pub struct ServerNetworkBehaviour {
     pub relay_client: relay::client::Behaviour,
     pub dcutr: dcutr::Behaviour,
     pub autonat: autonat::Behaviour,
+    pub ping: ping::Behaviour,
 }
 
 pub enum P2pServiceQuery {
@@ -405,14 +406,10 @@ where S: ShareChain
         let peer_info_squad_raw: Vec<u8> = self.create_peer_info(public_addresses).await?.try_into()?;
 
         // broadcast peer info to squad
-        self.swarm
-            .behaviour_mut()
-            .gossipsub
-            .publish(
-                IdentTopic::new(Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC)),
-                peer_info_squad_raw,
-            )
-            .map_err(|error| Error::LibP2P(LibP2PError::Publish(error)))?;
+        self.swarm.behaviour_mut().gossipsub.publish(
+            IdentTopic::new(Self::squad_topic(&self.config.squad, PEER_INFO_TOPIC)),
+            peer_info_squad_raw,
+        )?;
 
         Ok(())
     }
@@ -424,8 +421,8 @@ where S: ShareChain
     async fn create_peer_info(&mut self, public_addresses: Vec<Multiaddr>) -> Result<PeerInfo, Error> {
         let share_chain_sha3x = self.share_chain_sha3x.clone();
         let share_chain_random_x = self.share_chain_random_x.clone();
-        let current_height_sha3x = share_chain_sha3x.tip_height().await.map_err(Error::ShareChain)?;
-        let current_height_random_x = share_chain_random_x.tip_height().await.map_err(Error::ShareChain)?;
+        let current_height_sha3x = share_chain_sha3x.tip_height().await?;
+        let current_height_random_x = share_chain_random_x.tip_height().await?;
         let current_pow_sha3x = share_chain_sha3x.chain_pow().await.as_u128();
         let current_pow_random_x = share_chain_random_x.chain_pow().await.as_u128();
         let peer_info_squad_raw = PeerInfo::new(
@@ -1215,6 +1212,9 @@ where S: ShareChain
                 ServerNetworkBehaviourEvent::PeerSync(event) => {
                     info!(target: LOG_TARGET, "[PEER SYNC]: {event:?}");
                 },
+                ServerNetworkBehaviourEvent::Ping(event) => {
+                    info!(target: LOG_TARGET, "[PING]: {event:?}");
+                },
             },
             _ => {},
         };
@@ -1537,11 +1537,7 @@ where S: ShareChain
             addresses.iter().for_each(|addr| {
                 let listen_addr = addr.clone().with(Protocol::P2pCircuit);
                 info!(target: LOG_TARGET, "Try to listen on {:?}...", listen_addr);
-                match self
-                    .swarm
-                    .listen_on(listen_addr.clone())
-                    .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))
-                {
+                match self.swarm.listen_on(listen_addr.clone()) {
                     Ok(_) => {
                         info!(target: LOG_TARGET, "Listening on {listen_addr:?}");
                         relay.is_circuit_established = true;
@@ -1777,15 +1773,7 @@ where S: ShareChain
 
                     // broadcast peer info
                     if let Err(error) = self.broadcast_peer_info().await {
-                        match error {
-                            Error::LibP2P(LibP2PError::Publish(PublishError::InsufficientPeers)) => {
-                                warn!(target: LOG_TARGET, squad = &self.config.squad; "No peers to broadcast peer info!");
-                            }
-                            Error::LibP2P(LibP2PError::Publish(PublishError::Duplicate)) => {}
-                            _ => {
-                                error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to publish node info: {error:?}");
-                            }
-                        }
+                        warn!(target: LOG_TARGET, "Failed to broadcast peer info: {error:?}");
                     }
 
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
@@ -1994,12 +1982,10 @@ where S: ShareChain
 
         let dns_resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
         for seed_peer in &self.config.seed_peers {
-            let addr = seed_peer
-                .parse::<Multiaddr>()
-                .map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?;
+            let addr = seed_peer.parse::<Multiaddr>()?;
             let addr_parts = addr.iter().collect_vec();
             if addr_parts.is_empty() {
-                return Err(Error::LibP2P(LibP2PError::MultiAddrEmpty));
+                return Err(anyhow!("Seed peer address is empty"));
             }
             let is_dns_addr = matches!(addr_parts.first(), Some(Protocol::Dnsaddr(_)));
             let peer_id = match addr.iter().last() {
@@ -2007,7 +1993,7 @@ where S: ShareChain
                 _ => None,
             };
             if peer_id.is_none() && !is_dns_addr {
-                return Err(Error::LibP2P(LibP2PError::MissingPeerId(seed_peer.clone())));
+                return Err(anyhow!("Seed peer address does not contain peer id"));
             }
 
             if is_dns_addr {
@@ -2071,13 +2057,10 @@ where S: ShareChain
     }
 
     fn parse_dnsaddr_txt(&self, txt: &[u8]) -> Result<Multiaddr, Error> {
-        let txt_str =
-            String::from_utf8(txt.to_vec()).map_err(|error| Error::LibP2P(LibP2PError::ConvertBytesToString(error)))?;
+        let txt_str = String::from_utf8(txt.to_vec())?;
         match txt_str.strip_prefix("dnsaddr=") {
-            None => Err(Error::LibP2P(LibP2PError::InvalidDnsEntry(
-                "Missing `dnsaddr=` prefix.".to_string(),
-            ))),
-            Some(a) => Ok(Multiaddr::try_from(a).map_err(|error| Error::LibP2P(LibP2PError::MultiAddrParse(error)))?),
+            None => Err(anyhow!("Missing `dnsaddr=` prefix.")),
+            Some(a) => Ok(Multiaddr::try_from(a)?),
         }
     }
 
@@ -2090,20 +2073,13 @@ where S: ShareChain
     pub async fn start(&mut self) -> Result<(), Error> {
         // listen on local address
         self.swarm
-            .listen_on(
-                format!("/ip4/0.0.0.0/tcp/{}", self.port)
-                    .parse()
-                    .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?,
-            )
-            .map_err(|e| Error::LibP2P(LibP2PError::Transport(e)))?;
+            .listen_on(format!("/ip4/0.0.0.0/tcp/{}", self.port).parse()?)?;
 
         // external address
         if let Some(external_addr) = &self.config.external_addr {
             self.swarm.add_external_address(
                 // format!("/ip4/{}/tcp/{}", external_addr, self.port)
-                external_addr
-                    .parse()
-                    .map_err(|e| Error::LibP2P(LibP2PError::MultiAddrParse(e)))?,
+                external_addr.parse()?,
             );
         }
 

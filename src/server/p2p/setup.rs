@@ -3,24 +3,11 @@
 
 use std::{num::NonZeroU32, time::Duration};
 
+use anyhow::Error;
 use blake2::Blake2b;
 use digest::{consts::U32, generic_array::GenericArray, Digest};
 use libp2p::{
-    autonat::{self},
-    connection_limits::{self, ConnectionLimits},
-    dcutr,
-    gossipsub::{self, Message, MessageId},
-    identify,
-    identity::Keypair,
-    mdns::{self},
-    noise,
-    relay,
-    request_response::{self, cbor},
-    swarm::behaviour::toggle::Toggle,
-    tcp,
-    yamux,
-    StreamProtocol,
-    Swarm,
+    autonat::{self}, connection_limits::{self, ConnectionLimits}, dcutr, gossipsub::{self, Message, MessageId}, identify, identity::Keypair, mdns::{self}, noise, ping, relay, request_response::{self, cbor}, swarm::behaviour::toggle::Toggle, tcp, yamux, StreamProtocol, Swarm
 };
 use libp2p_peersync::store::MemoryPeerStore;
 use tokio::{
@@ -39,11 +26,7 @@ use super::{
 };
 use crate::server::{
     config,
-    p2p::{
-        messages::{ShareChainSyncRequest, ShareChainSyncResponse},
-        Error,
-        LibP2PError,
-    },
+    p2p::messages::{ShareChainSyncRequest, ShareChainSyncResponse},
 };
 
 /// Generates or reads libp2p private key if stable_peer is set to true otherwise returns a random key.
@@ -66,36 +49,33 @@ pub(crate) async fn keypair(config: &Config) -> Result<Keypair, Error> {
 
     if let Ok(mut file) = File::open(key_path.clone()).await {
         if file.read_to_end(&mut content).await.is_ok() {
-            return Keypair::from_protobuf_encoding(content.as_slice())
-                .map_err(|error| Error::LibP2P(LibP2PError::KeyDecoding(error)));
+            return Ok(Keypair::from_protobuf_encoding(content.as_slice()) ?);
         }
     }
 
     // otherwise create a new one
     let key_pair = Keypair::generate_ed25519();
-    let mut new_private_key_file = File::create_new(key_path)
-        .await
-        .map_err(|error| Error::LibP2P(LibP2PError::IO(error)))?;
+    let mut new_private_key_file = File::create_new(key_path).await?;
     new_private_key_file
-        .write_all(
-            key_pair
-                .to_protobuf_encoding()
-                .map_err(|error| Error::LibP2P(LibP2PError::KeyDecoding(error)))?
-                .as_slice(),
-        )
-        .await
-        .map_err(|error| Error::LibP2P(LibP2PError::IO(error)))?;
+        .write_all(key_pair.to_protobuf_encoding()?.as_slice())
+        .await?;
 
     Ok(key_pair)
 }
 
 pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNetworkBehaviour>, Error> {
-    let mut swarm = libp2p::SwarmBuilder::with_existing_identity(keypair(&config.p2p_service).await?)
+    let swarm = libp2p::SwarmBuilder::with_existing_identity(keypair(&config.p2p_service).await?)
         .with_tokio()
-        .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)
-        .map_err(|error| Error::LibP2P(LibP2PError::Noise(error)))?
+       .with_tcp(tcp::Config::default().nodelay(true), // Nodelay helps with hole punching
+         noise::Config::new, yamux::Config::default)
+        ?
+        .with_quic_config(|mut config| {
+            config.handshake_timeout = Duration::from_secs(30);
+            config
+        })
+  
         .with_relay_client(noise::Config::new, yamux::Config::default)
-        .map_err(|error| Error::LibP2P(LibP2PError::Noise(error)))?
+        ?
         .with_behaviour(|key_pair, relay_client| {
             // .with_behaviour(move |key_pair, relay_client| {
             // gossipsub
@@ -126,7 +106,7 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
             if config.p2p_service.mdns_enabled {
                 mdns_service = Toggle::from(Some(
                     mdns::Behaviour::new(mdns::Config::default(), key_pair.public().to_peer_id())
-                        .map_err(|e| Error::LibP2P(LibP2PError::IO(e)))?,
+                        ?,
                 ));
             }
 
@@ -181,9 +161,10 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
                 dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
                 autonat: autonat::Behaviour::new(key_pair.public().to_peer_id(), Default::default()),
                 connection_limits: connection_limits::Behaviour::new(ConnectionLimits::default().with_max_established_incoming(config.max_incoming_connections).with_max_established_outgoing(config.max_outgoing_connections)),
+                ping: ping::Behaviour::new(ping::Config::default())
             })
         })
-        .map_err(|e| Error::LibP2P(LibP2PError::Behaviour(e.to_string())))?
+        ?
         // In most cases libp2p will keep connections open that we need. Setting this higher 
         // will make us keep connections open that we don't need.
         // .with_swarm_config(|c| c.with_idle_connection_timeout(config.idle_connection_timeout))

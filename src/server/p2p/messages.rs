@@ -149,7 +149,7 @@ impl CatchUpSyncRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CatchUpSyncResponse {
-    version: u64,
+    pub version: u64,
     peer_id: PeerId,
     algo: u64,
     blocks: Vec<P2Block>,

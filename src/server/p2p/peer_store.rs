@@ -249,8 +249,8 @@ impl PeerStore {
         match algo {
             PowAlgorithm::RandomX => peers.sort_by(|a, b| {
                 b.peer_info
-                    .current_random_x_height
-                    .cmp(&a.peer_info.current_random_x_height)
+                    .current_random_x_pow
+                    .cmp(&a.peer_info.current_random_x_pow)
                     .then(
                         b.last_new_tip_notify
                             .as_ref()
@@ -266,21 +266,18 @@ impl PeerStore {
             }),
             PowAlgorithm::Sha3x => {
                 peers.sort_by(|a, b| {
-                    b.peer_info
-                        .current_sha3x_height
-                        .cmp(&a.peer_info.current_sha3x_height)
-                        .then(
-                            b.last_new_tip_notify
-                                .as_ref()
-                                .map(|n| n.timestamp)
-                                .unwrap_or(b.peer_info.timestamp)
-                                .cmp(
-                                    &a.last_new_tip_notify
-                                        .as_ref()
-                                        .map(|n| n.timestamp)
-                                        .unwrap_or(a.peer_info.timestamp),
-                                ),
-                        )
+                    b.peer_info.current_sha3x_pow.cmp(&a.peer_info.current_sha3x_pow).then(
+                        b.last_new_tip_notify
+                            .as_ref()
+                            .map(|n| n.timestamp)
+                            .unwrap_or(b.peer_info.timestamp)
+                            .cmp(
+                                &a.last_new_tip_notify
+                                    .as_ref()
+                                    .map(|n| n.timestamp)
+                                    .unwrap_or(a.peer_info.timestamp),
+                            ),
+                    )
                 });
             },
         }

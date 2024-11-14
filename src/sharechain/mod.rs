@@ -54,7 +54,7 @@ pub const DIFFICULTY_ADJUSTMENT_WINDOW: usize = 90;
 
 pub const BLOCK_TARGET_TIME: u64 = 10;
 
-pub const MIN_RANDOMX_SCALING_FACTOR: u64 = 1;
+pub const MIN_RANDOMX_SCALING_FACTOR: u64 = 4;
 pub const MIN_SHA3X_SCALING_FACTOR: u64 = 1;
 
 pub mod error;
@@ -134,14 +134,6 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
         limit: usize,
         last_block_received: Option<(u64, FixedHash)>,
     ) -> Result<Vec<Arc<P2Block>>, Error>;
-
-    /// Returns the estimated hash rate of the whole chain
-    /// (including all blocks and not just strongest chain).
-    /// Returning number is the result in hash/second.
-    async fn hash_rate(&self) -> Result<BigUint, Error>;
-
-    /// Returns the current miners with all the current shares in the current blocks window.
-    async fn miners_with_shares(&self, squad: Squad) -> Result<HashMap<String, (u64, Vec<u8>)>, Error>;
 
     async fn get_target_difficulty(&self, height: u64) -> Difficulty;
 

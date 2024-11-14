@@ -635,10 +635,7 @@ impl ShareChain for InMemoryShareChain {
         if let Some(last_block_received) = last_block_received {
             if let Some(level) = p2_chain_read.level_at_height(last_block_received.0) {
                 if let Some(block) = level.blocks.get(&last_block_received.1) {
-                    // Only split if the block is in the main chain
-                    if level.chain_block == block.hash {
-                        split_height = block.height;
-                    }
+                    split_height = block.height;
                 }
             }
         }
@@ -664,73 +661,6 @@ impl ShareChain for InMemoryShareChain {
 
         self.all_blocks(Some(cmp::max(split_height, split_height2)), limit, true)
             .await
-    }
-
-    async fn hash_rate(&self) -> Result<BigUint, Error> {
-        Ok(BigUint::zero())
-        // TODO: This calc is wrong
-        // let p2_chain = self.p2_chain.read().await;
-        // if p2_chain.is_empty() {
-        //     return Ok(BigUint::zero());
-        // }
-
-        // let blocks = p2_chain
-        //     .iter()
-        //     .flat_map(|level| level.blocks.clone())
-        //     .sorted_by(|block1, block2| block1.timestamp.cmp(&block2.timestamp))
-        //     .tail(BLOCKS_WINDOW);
-
-        // // calculate average block time
-        // let blocks = blocks.collect_vec();
-        // let mut block_times_sum = 0;
-        // let mut block_times_count: u64 = 0;
-        // for i in 0..blocks.len() {
-        //     let current_block = blocks.get(i);
-        //     let next_block = blocks.get(i + 1);
-        //     if let Some(current_block) = current_block {
-        //         if let Some(next_block) = next_block {
-        //             block_times_sum += next_block.timestamp.as_u64() - current_block.timestamp.as_u64();
-        //             block_times_count += 1;
-        //         }
-        //     }
-        // }
-
-        // // return to avoid division by zero
-        // if block_times_sum == 0 || block_times_count == 0 {
-        //     return Ok(BigUint::zero());
-        // }
-
-        // let avg_block_time: f64 = (block_times_sum / block_times_count) as f64;
-
-        // // collect all hash rates
-        // let mut hash_rates_sum = BigUint::zero();
-        // let mut hash_rates_count = BigUint::zero();
-        // for block in blocks {
-        //     let difficulty = self.block_difficulty(&block)?;
-        //     let current_hash_rate_f64 = difficulty as f64 / avg_block_time;
-        //     let current_hash_rate =
-        //         u64::from_f64(current_hash_rate_f64).ok_or(Error::FromF64ToU64Conversion(current_hash_rate_f64))?;
-        //     hash_rates_sum = hash_rates_sum.add(current_hash_rate);
-        //     hash_rates_count.inc();
-        // }
-
-        // Ok(hash_rates_sum.div(hash_rates_count))
-    }
-
-    async fn miners_with_shares(&self, _squad: Squad) -> Result<HashMap<String, (u64, Vec<u8>)>, Error> {
-        let chain_read_lock = self.p2_chain.read().await;
-        let mut miners_to_shares = if let Some(ref cached_shares) = chain_read_lock.cached_shares {
-            cached_shares.clone()
-        } else {
-            HashMap::new()
-        };
-        if miners_to_shares.is_empty() {
-            drop(chain_read_lock);
-            // if there is none, lets see if we need to calculate one
-            let mut wl = self.p2_chain.write().await;
-            miners_to_shares = self.get_calculate_and_cache_hashmap_of_shares(&mut wl).await?;
-        }
-        Ok(miners_to_shares)
     }
 
     async fn get_target_difficulty(&self, height: u64) -> Difficulty {

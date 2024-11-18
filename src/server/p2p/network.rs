@@ -248,8 +248,6 @@ pub struct ServerNetworkBehaviour {
     pub share_chain_sync: cbor::Behaviour<ShareChainSyncRequest, ShareChainSyncResponse>,
     pub direct_peer_exchange: cbor::Behaviour<DirectPeerInfoRequest, DirectPeerInfoResponse>,
     pub catch_up_sync: cbor::Behaviour<CatchUpSyncRequest, CatchUpSyncResponse>,
-    // pub kademlia: kad::Behaviour<MemoryStore>,
-    pub peer_sync: libp2p_peersync::Behaviour<libp2p_peersync::store::MemoryPeerStore>,
     pub identify: identify::Behaviour,
     pub relay_server: Toggle<relay::Behaviour>,
     pub relay_client: relay::client::Behaviour,
@@ -309,7 +307,7 @@ pub(crate) struct ConnectionCounters {
 
 enum InnerRequest {
     SyncChainRequest((ResponseChannel<ShareChainSyncResponse>, ShareChainSyncResponse)),
-    SyncChainResponse(SyncShareChain),
+    DoSyncChain(SyncShareChain),
     CatchUpSyncRequest((ResponseChannel<CatchUpSyncResponse>, CatchUpSync)),
     PerformCatchUpSync(PerformCatchUpSync),
 }
@@ -559,15 +557,8 @@ where S: ShareChain
                             }
                             debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[SQUAD_PEERINFO_TOPIC] New peer info: {source_peer:?} -> {payload:?}");
 
-                            if self.add_peer(payload, source_peer).await && !self.config.is_seed_peer {
-                                let _= self.swarm
-                                    .behaviour_mut()
-                                    .peer_sync
-                                    .add_want_peers(vec![source_peer]).await.inspect_err(|e| {
-                                        error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers: {e:?}");
-                                    });
-                                self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&source_peer);
-                            }
+                            self.add_peer(payload, source_peer).await;
+                            // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&source_peer);
                             return Ok(MessageAcceptance::Accept);
                         },
                         Err(error) => {
@@ -622,16 +613,7 @@ where S: ShareChain
                                 .write()
                                 .await
                                 .add_last_new_tip_notify(&source_peer, payload.clone());
-                            let _ = self
-                                .swarm
-                                .behaviour_mut()
-                                .peer_sync
-                                .add_want_peers(vec![source_peer])
-                                .await
-                                .inspect_err(|error| {
-                                    info!(target: LOG_TARGET, squad = &self.config.squad; "Failed to add want peers:
-                            {error:?}");
-                                });
+
                             // If we don't have this peer, try do peer exchange
                             // if !self.network_peer_store.exists(message_peer) {
                             //     self.initiate_direct_peer_exchange(message_peer).await;
@@ -666,7 +648,12 @@ where S: ShareChain
 
                             // if payload.
                             let max_payload_height = payload.new_blocks.iter().map(|(h, _)| *h).max().unwrap_or(0);
-                            if max_payload_height > our_tip.saturating_add(2) {
+                            // Either the tip is too far ahead and we need to catch up, or the chain is below ours but
+                            // with a higher proof of work, so we then need to reorg to that chain.
+                            // In both cases catchup sync will be better than simple sync
+                            if max_payload_height > our_tip.saturating_add(2) ||
+                                max_payload_height < our_tip.saturating_sub(5)
+                            {
                                 debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is too far ahead, we need to initiate chatchup sync", message_peer);
                                 let perform_catch_up_sync = PerformCatchUpSync {
                                     algo,
@@ -695,12 +682,14 @@ where S: ShareChain
                                     missing_parents: missing_blocks,
                                     is_from_new_block_notify: true,
                                 };
-                                let _ = self
-                                    .inner_request_tx
-                                    .send(InnerRequest::SyncChainResponse(sync_share_chain));
+                                let _ = self.inner_request_tx.send(InnerRequest::DoSyncChain(sync_share_chain));
                             }
 
-                            return Ok(MessageAcceptance::Accept);
+                            // Ignore so that we only tell our closest peers. IDK if this is the correct approach
+                            // but we are sending too many messages. It might be better to use REQ-RES for this and to
+                            // trigger a manually request to each of the peers we are
+                            // connected to instead.
+                            return Ok(MessageAcceptance::Ignore);
                         },
                         Err(error) => {
                             // TODO: elevate to error
@@ -941,9 +930,9 @@ where S: ShareChain
         let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         let squad = self.config.squad.clone();
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received sync response for chain {} from {} with blocks {}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "));
-        // let new_tip_notify = self.client_broadcast_block_tx.clone();
+        let new_tip_notify = self.client_broadcast_block_tx.clone();
         let tx = self.inner_request_tx.clone();
-        // let local_peer_id = self.local_peer_id();
+        let local_peer_id = self.local_peer_id();
         let peer_store = self.network_peer_store.clone();
         tokio::spawn(async move {
             match share_chain.add_synced_blocks(&blocks).await {
@@ -957,9 +946,8 @@ where S: ShareChain
                             error!(target: SYNC_REQUEST_LOG_TARGET, "Could not get added new tip from chain storage");
                             return;
                         };
-                        // let total_pow = share_chain.get_total_chain_pow().await;
-                        // let _ = new_tip_notify.send(NotifyNewTipBlock::new(local_peer_id, algo, new_blocks,
-                        // total_pow));
+                        let total_pow = share_chain.get_total_chain_pow().await;
+                        let _ = new_tip_notify.send(NotifyNewTipBlock::new(local_peer_id, algo, new_blocks, total_pow));
                     }
                 },
                 Err(error) => match error {
@@ -971,7 +959,7 @@ where S: ShareChain
                             is_from_new_block_notify: false,
                         };
 
-                        let _ = tx.send(InnerRequest::SyncChainResponse(sync_share_chain));
+                        let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
                         return;
                     },
                     _ => {
@@ -1023,19 +1011,24 @@ where S: ShareChain
         }
         // Always ask for at least 20 blocks to avoid too many requests,
         // Unless it's from new block notify, in which case we'll only want a single block in most cases
-        if !is_from_new_block_notify && missing_parents.len() < 20 {
-            let min_parent = missing_parents.iter().min_by_key(|a| a.0).unwrap().0;
-            // We checked it's less than 20 above
-            for i in 0..(20 - missing_parents.len()) {
-                missing_parents.push((min_parent.saturating_sub(i as u64), FixedHash::default()));
-            }
-        };
-        debug!(target: LOG_TARGET, squad = &self.config.squad; "Send share chain sync request to specific peer: {peer}");
-        let _outbound_id = self
-            .swarm
-            .behaviour_mut()
-            .share_chain_sync
-            .send_request(&peer, ShareChainSyncRequest::new(algo, missing_parents));
+        // Not sure if this is necessary anymore
+
+        // if !is_from_new_block_notify && missing_parents.len() < 20 {
+        //     let min_parent = missing_parents.iter().min_by_key(|a| a.0).unwrap().0;
+        //     // We checked it's less than 20 above
+        //     for i in 0..(20 - missing_parents.len()) {
+        //         missing_parents.push((min_parent.saturating_sub(i as u64), FixedHash::default()));
+        //     }
+        // };
+
+        // ask our connected peers rather than everyone swarming the original peer
+        let connected_peers: Vec<_> = self.swarm.connected_peers().cloned().collect();
+        for connected_peer in connected_peers {
+            let _outbound_id = self.swarm.behaviour_mut().share_chain_sync.send_request(
+                &connected_peer,
+                ShareChainSyncRequest::new(algo, missing_parents.clone()),
+            );
+        }
     }
 
     /// Main method to handle libp2p events.
@@ -1358,9 +1351,6 @@ where S: ShareChain
                     info!(target: LOG_TARGET, "[DCUTR]: {event:?}");
                 },
                 ServerNetworkBehaviourEvent::Autonat(event) => self.handle_autonat_event(event).await,
-                ServerNetworkBehaviourEvent::PeerSync(event) => {
-                    info!(target: LOG_TARGET, "[PEER SYNC]: {event:?}");
-                },
                 ServerNetworkBehaviourEvent::Ping(event) => {
                     info!(target: LOG_TARGET, "[PING]: {event:?}");
                     // Remove a peer from the greylist if we are in contact with them
@@ -1492,7 +1482,7 @@ where S: ShareChain
                             missing_parents,
                             is_from_new_block_notify: false,
                         };
-                        let _ = tx.send(InnerRequest::SyncChainResponse(sync_share_chain));
+                        let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
                         return;
                     },
                     _ => {
@@ -1849,7 +1839,7 @@ where S: ShareChain
                     error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
                 }
             },
-            InnerRequest::SyncChainResponse(sync_chain) => {
+            InnerRequest::DoSyncChain(sync_chain) => {
                 self.sync_share_chain(sync_chain).await;
             },
             InnerRequest::CatchUpSyncRequest((channel, sync)) => {
@@ -1942,7 +1932,7 @@ where S: ShareChain
                 _ = seek_connections_interval.tick() => {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer {
-                        if self.swarm.connected_peers().count() > 15 {
+                        if self.swarm.connected_peers().count() > 13 {
                             continue;
                         }
                         let mut num_dialed = 0;

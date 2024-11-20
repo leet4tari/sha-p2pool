@@ -910,11 +910,12 @@ where S: ShareChain
         let local_peer_id = *self.swarm.local_peer_id();
         let squad = self.config.squad.clone();
         tokio::spawn(async move {
-            let response = ShareChainSyncResponse::new(
-                local_peer_id,
-                request.algo(),
-                &share_chain.get_blocks(request.missing_blocks()).await,
-            );
+            let blocks = share_chain.get_blocks(request.missing_blocks()).await;
+            if blocks.is_empty() {
+                warn!(target: LOG_TARGET, squad; "No blocks found for sync request");
+                return;
+            }
+            let response = ShareChainSyncResponse::new(local_peer_id, request.algo(), &blocks);
 
             if tx.send(InnerRequest::SyncChainRequest((channel, response))).is_err() {
                 error!(target: LOG_TARGET, squad; "Failed to send block sync response");
@@ -930,6 +931,11 @@ where S: ShareChain
 
         if response.version() != PROTOCOL_VERSION {
             trace!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", peer);
+            return;
+        }
+
+        if response.blocks.is_empty() {
+            trace!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent 0 blocks", peer);
             return;
         }
         let timer = Instant::now();

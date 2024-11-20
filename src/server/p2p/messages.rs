@@ -280,7 +280,7 @@ pub struct ShareChainSyncResponse {
     version: u64,
     peer_id: PeerId,
     algo: u64,
-    blocks: Vec<P2Block>,
+    pub blocks: Vec<P2Block>,
 }
 
 impl ShareChainSyncResponse {

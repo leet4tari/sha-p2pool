@@ -1456,7 +1456,7 @@ where S: ShareChain
             for b in &blocks {
                 match share_chain.add_synced_blocks(&[b.clone()]).await {
                     Ok(result) => {
-                        info!(target: LOG_TARGET, "Block added");
+                        info!(target: LOG_TARGET, "Block added {}:{}:{}", algo, b.height, &b.hash.to_hex()[0..8]);
                     },
                     Err(error) => match error {
                         crate::sharechain::error::ShareChainError::BlockParentDoesNotExist { missing_parents } => {
@@ -1497,7 +1497,7 @@ where S: ShareChain
 
             info!(target: SYNC_REQUEST_LOG_TARGET, squad = &squad; "Synced blocks added to share chain");
             let our_pow = share_chain.get_total_chain_pow().await;
-            let mut must_continue_sync = missing_blocks.is_empty && their_pow > our_pow.as_u128();
+            let mut must_continue_sync = missing_blocks.is_empty() && their_pow > our_pow.as_u128();
             info!(target: SYNC_REQUEST_LOG_TARGET, "[{:?}] must continue: {}", algo, must_continue_sync);
             // Check if we have recieved their tip
             if blocks.iter().any(|b| b.hash == their_tip_hash) {

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use human_format::Formatter;
-use log::{error, info};
+use log::{debug, error, info};
 use serde::Serialize;
 use tari_core::proof_of_work::{Difficulty, PowAlgorithm};
 use tari_shutdown::ShutdownSignal;
@@ -94,15 +94,18 @@ impl StatsCollector {
             },
             StatData::ChainChanged {
                 algo, height, length, ..
-            } => match algo {
-                PowAlgorithm::Sha3x => {
-                    self.sha3x_chain_height = height;
-                    self.sha3x_chain_length = length;
-                },
-                PowAlgorithm::RandomX => {
-                    self.randomx_chain_height = height;
-                    self.randomx_chain_length = length;
-                },
+            } => {
+                debug!(target: LOG_TARGET, "Chain changed: {} {} {}", algo, height, length);
+                match algo {
+                    PowAlgorithm::Sha3x => {
+                        self.sha3x_chain_height = height;
+                        self.sha3x_chain_length = length;
+                    },
+                    PowAlgorithm::RandomX => {
+                        self.randomx_chain_height = height;
+                        self.randomx_chain_length = length;
+                    },
+                };
             },
             StatData::NewPeer {
                 total_peers,

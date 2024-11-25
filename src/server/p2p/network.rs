@@ -603,7 +603,7 @@ where S: ShareChain
                             if message_peer.to_string() != source_peer.to_string() {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block with a different peer id: {}, skipping", source_peer, message_peer);
                             }
-                            info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> {payload:?}");
+                            info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> [{}] Blocks: {}", payload.algo(), payload.new_blocks.iter().map(|b| format!("{}:{}", b.height, &b.hash.to_hex()[0..8])).collect::<Vec<String>>().join(","));
 
                             // If we don't have this peer, try do peer exchange
                             // if !self.network_peer_store.exists(message_peer) {
@@ -641,6 +641,16 @@ where S: ShareChain
                                     our_tip.saturating_sub(4)
                             {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is not better than ours, skipping", message_peer);
+                                return Ok(MessageAcceptance::Ignore);
+                            }
+
+                            // If the tip is much higher than ours, it may be either a fake block or on a part of the
+                            // network that we can't get to
+                            if payload.new_blocks.iter().map(|b| b.height).max().unwrap_or(0) >
+                                our_tip.saturating_add(10)
+                            {
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block that is much higher than ours, skipping", message_peer);
+                                // Is reject too harsh? Maybe we should just ignore it
                                 return Ok(MessageAcceptance::Ignore);
                             }
 
@@ -1485,7 +1495,7 @@ where S: ShareChain
                             return;
                         },
                     },
-                };
+                }
             }
             info!(target: LOG_TARGET, "[{:?}][new tip: {}] Blocks added {:?}", new_tip, algo, blocks_added);
             if missing_blocks.len() > 0 {

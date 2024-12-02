@@ -485,9 +485,9 @@ where S: ShareChain
 
     /// Subscribes to all topics we need.
     async fn subscribe_to_topics(&mut self) {
-        // if self.config.is_seed_peer {
-        //     return;
-        // }
+        if self.config.is_seed_peer {
+            return;
+        }
         self.subscribe(PEER_INFO_TOPIC, true);
         self.subscribe(BLOCK_NOTIFY_TOPIC, true);
     }
@@ -570,25 +570,17 @@ where S: ShareChain
                             }
                             let payload = Arc::new(payload);
                             let message_peer = payload.peer_id();
-                            if message_peer.to_string() != source_peer.to_string() {
-                                info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent a block with a different peer id: {}, skipping", source_peer, message_peer);
-                            }
                             info!(target: NEW_TIP_NOTIFY_LOGGING_LOG_TARGET, "[SQUAD_NEW_BLOCK_TOPIC] New block from gossip: {source_peer:?} -> [{}] Blocks: {}", payload.algo(), payload.new_blocks.iter().map(|b| format!("{}:{}", b.height, &b.hash.to_hex()[0..8])).collect::<Vec<String>>().join(","));
-
-                            // If we don't have this peer, try do peer exchange
-                            // if !self.network_peer_store.exists(message_peer) {
-                            //     self.initiate_direct_peer_exchange(message_peer).await;
-                            // }
-
-                            if self.config.is_seed_peer {
-                                return Ok(MessageAcceptance::Accept);
-                            }
 
                             // verify payload
                             if payload.new_blocks.is_empty() {
                                 info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} sent notify new tip with no blocks.", message_peer);
                                 return Ok(MessageAcceptance::Reject);
                             }
+
+                            // if self.config.is_seed_peer {
+                            //     return Ok(MessageAcceptance::Accept);
+                            // }
 
                             info!(target: LOG_TARGET, squad = &self.config.squad; "[{:?}]🆕 New block from broadcast: {:?}", &payload.new_blocks.first().unwrap().original_header.pow.pow_algo ,&payload.new_blocks.iter().map(|b| b.height.to_string()).collect::<Vec<String>>());
                             // info!(target: LOG_TARGET, squad = &self.config.squad; "🆕 New blocks from broadcast:
@@ -643,7 +635,7 @@ where S: ShareChain
                                     if !missing_parents.is_empty() {
                                         if missing_parents.len() > 5 {
                                             info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing more than 5 blocks, we are missing: {}", missing_parents.len());
-                                            return Ok(MessageAcceptance::Accept);
+                                            return Ok(MessageAcceptance::Ignore);
                                         }
 
                                         if our_tip < max_payload_height.saturating_sub(10) ||
@@ -662,6 +654,7 @@ where S: ShareChain
 
                                         let _unused =
                                             self.inner_request_tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                                        return Ok(MessageAcceptance::Accept);
                                     }
                                 },
                                 Err(error) => {
@@ -872,6 +865,11 @@ where S: ShareChain
                     return;
                 }
 
+                // if we are a seed peer, end here
+                if self.config.is_seed_peer {
+                    return;
+                }
+
                 let our_tip_sha3x = self.share_chain_sha3x.chain_pow().await;
 
                 if response.info.current_sha3x_pow > our_tip_sha3x.as_u128() {
@@ -1005,7 +1003,7 @@ where S: ShareChain
 
     /// Trigger share chain sync with another peer with the highest known block height.
     /// Note: this is a "stop-the-world" operation, many operations are skipped when synchronizing.
-    async fn sync_share_chain(&mut self, sync_share_chain: SyncShareChain) {
+    async fn sync_missing_blocks(&mut self, sync_share_chain: SyncShareChain) {
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Syncing share chain...");
         let SyncShareChain {
             peer,
@@ -1024,36 +1022,58 @@ where S: ShareChain
             // panic!("Sync called but with no missing parents.");
             return;
         }
-        // Always ask for at least 20 blocks to avoid too many requests,
-        // Unless it's from new block notify, in which case we'll only want a single block in most cases
-        // Not sure if this is necessary anymore
 
-        // if !is_from_new_block_notify && missing_parents.len() < 20 {
-        //     let min_parent = missing_parents.iter().min_by_key(|a| a.0).unwrap().0;
-        //     // We checked it's less than 20 above
-        //     for i in 0..(20 - missing_parents.len()) {
-        //         missing_parents.push((min_parent.saturating_sub(i as u64), FixedHash::default()));
-        //     }
-        // };
+        // If it's not from new_block_notify, ask only the peer that sent the blocks
+        if !is_from_new_block_notify {
+            info!(target: LOG_TARGET, squad = &self.config.squad; "Sending sync request direct to peer {} for blocks {:?} because we did not receive it from new tip notify", peer, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
 
-        // ask our connected peers rather than everyone swarming the original peer
-        let mut sent_to_original_peer = false;
-        let connected_peers: Vec<_> = self.swarm.connected_peers().copied().collect();
-        for connected_peer in connected_peers {
-            if connected_peer == peer {
-                sent_to_original_peer = true;
-            }
-            let _outbound_id = self.swarm.behaviour_mut().share_chain_sync.send_request(
-                &connected_peer,
-                SyncMissingBlocksRequest::new(algo, missing_parents.clone()),
-            );
-        }
-        if !sent_to_original_peer && !is_from_new_block_notify {
             let _outbound_id = self
                 .swarm
                 .behaviour_mut()
                 .share_chain_sync
                 .send_request(&peer, SyncMissingBlocksRequest::new(algo, missing_parents.clone()));
+            return;
+        }
+        // ask our connected peers rather than everyone swarming the original peer
+        // let mut sent_to_original_peer = false;
+        let connected_peers: Vec<_> = self.swarm.connected_peers().copied().collect();
+        let read_lock = self.network_peer_store.read().await;
+        let min_height = missing_parents.iter().map(|(height, _)| height).min().unwrap_or(&0);
+        let mut peers_asked = 0;
+        let mut highest_peer_height = 0;
+        for connected_peer in connected_peers {
+            if let Some(p) = read_lock.get(&connected_peer) {
+                match algo {
+                    PowAlgorithm::RandomX => {
+                        if p.peer_info.current_random_x_height > highest_peer_height {
+                            highest_peer_height = p.peer_info.current_random_x_height;
+                        }
+                        if p.peer_info.current_random_x_height.saturating_add(20) < *min_height {
+                            info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} is too far behind for RandomX sync", connected_peer);
+                            continue;
+                        }
+                    },
+                    PowAlgorithm::Sha3x => {
+                        if p.peer_info.current_sha3x_height > highest_peer_height {
+                            highest_peer_height = p.peer_info.current_sha3x_height;
+                        }
+                        if p.peer_info.current_sha3x_height.saturating_add(20) < *min_height {
+                            info!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} is too far behind for Sha3x sync", connected_peer);
+                            continue;
+                        }
+                    },
+                }
+            }
+
+            let _outbound_id = self.swarm.behaviour_mut().share_chain_sync.send_request(
+                &connected_peer,
+                SyncMissingBlocksRequest::new(algo, missing_parents.clone()),
+            );
+            peers_asked += 1;
+        }
+
+        if peers_asked == 0 {
+            warn!(target: LOG_TARGET, squad = &self.config.squad; "[{}] No connected peers had a high enough chain to ask for this missing block. Highest peer height:{}", algo, highest_peer_height);
         }
     }
 
@@ -1874,7 +1894,7 @@ where S: ShareChain
     async fn handle_inner_request(&mut self, req: InnerRequest) {
         match req {
             InnerRequest::DoSyncChain(sync_chain) => {
-                self.sync_share_chain(sync_chain).await;
+                self.sync_missing_blocks(sync_chain).await;
             },
             InnerRequest::PerformCatchUpSync(perform_catch_up_sync) => {
                 if let Err(e) = self.perform_catch_up_sync(perform_catch_up_sync).await {
@@ -1964,9 +1984,9 @@ where S: ShareChain
                              && !store_read_lock.is_seed_peer(&record.peer_id)  {
                                 let _unused = self.swarm.dial(record.peer_id);
                                 num_dialed += 1;
-                                // We can only do 80 connections
-                                // Dropping outbound because at capacity
-                                if num_dialed > 80 {
+                                // We can only do 30 connections
+                                // after 30 it starts cancelling dials
+                                if num_dialed > 30 {
                                     break;
                                 }
                             }

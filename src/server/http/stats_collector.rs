@@ -18,10 +18,12 @@ pub(crate) struct StatsCollector {
     request_tx: tokio::sync::mpsc::Sender<StatsRequest>,
     request_rx: tokio::sync::mpsc::Receiver<StatsRequest>,
     first_stat_received: Option<EpochTime>,
-    miner_accepted: u64,
-    miner_rejected: u64,
-    pool_accepted: u64,
-    pool_rejected: u64,
+    miner_rx_accepted: u64,
+    miner_sha_accepted: u64,
+    // miner_rejected: u64,
+    pool_rx_accepted: u64,
+    pool_sha_accepted: u64,
+    // pool_rejected: u64,
     sha_network_difficulty: Difficulty,
     sha_target_difficulty: Difficulty,
     randomx_network_difficulty: Difficulty,
@@ -49,10 +51,12 @@ impl StatsCollector {
             request_rx: rx,
             request_tx: tx,
             first_stat_received: None,
-            miner_accepted: 0,
-            miner_rejected: 0,
-            pool_accepted: 0,
-            pool_rejected: 0,
+            miner_rx_accepted: 0,
+            miner_sha_accepted: 0,
+            // miner_rejected: 0,
+            pool_rx_accepted: 0,
+            pool_sha_accepted: 0,
+            // pool_rejected: 0,
             sha3x_chain_height: 0,
             sha3x_chain_length: 0,
             randomx_chain_height: 0,
@@ -80,17 +84,21 @@ impl StatsCollector {
 
     fn handle_stat(&mut self, sample: StatData) {
         match sample {
-            StatData::MinerBlockAccepted { .. } => {
-                self.miner_accepted += 1;
+            StatData::MinerBlockAccepted { pow_algo, .. } => match pow_algo {
+                PowAlgorithm::Sha3x => {
+                    self.miner_sha_accepted += 1;
+                },
+                PowAlgorithm::RandomX => {
+                    self.miner_rx_accepted += 1;
+                },
             },
-            StatData::MinerBlockRejected { .. } => {
-                self.miner_rejected += 1;
-            },
-            StatData::PoolBlockAccepted { .. } => {
-                self.pool_accepted += 1;
-            },
-            StatData::PoolBlockRejected { .. } => {
-                self.pool_rejected += 1;
+            StatData::PoolBlockAccepted { pow_algo, .. } => match pow_algo {
+                PowAlgorithm::Sha3x => {
+                    self.pool_sha_accepted += 1;
+                },
+                PowAlgorithm::RandomX => {
+                    self.pool_rx_accepted += 1;
+                },
             },
             StatData::ChainChanged {
                 algo, height, length, ..
@@ -172,7 +180,7 @@ impl StatsCollector {
                             let formatter = Formatter::new();
 
                             info!(target: LOG_TARGET,
-                                    "========= Uptime: {}. v{} Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner(A/R): {}/{}. Pool(A/R) {}/{}. Peers(a/g/b) {}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
+                                    "========= Uptime: {}. v{} Chains:  Rx {}..{}, Sha3 {}..{}. Difficulty (Target/Network): Rx: {}/{} Sha3x: {}/{} Miner accepts(rx/sha): {}/{}. Pool accepts (rx/sha) {}/{}. Peers(a/g/b) {}/{}/{} libp2p (i/o) {}/{} Last gossip: {}==== ",
                                     humantime::format_duration(Duration::from_secs(
                                         EpochTime::now().as_u64().checked_sub(
                                             self.first_stat_received.unwrap_or(EpochTime::now()).as_u64())
@@ -186,10 +194,10 @@ impl StatsCollector {
             formatter.format(                            self.randomx_network_difficulty.as_u64() as f64),
                                     formatter.format(self.sha_target_difficulty.as_u64() as f64),
                                     formatter.format(self.sha_network_difficulty.as_u64() as f64),
-                                    self.miner_accepted,
-                                    self.miner_rejected,
-                                    self.pool_accepted,
-                                    self.pool_rejected,
+                                    self.miner_rx_accepted,
+                                    self.miner_sha_accepted,
+                                    self.pool_rx_accepted,
+                                    self.pool_sha_accepted,
                                     self.total_peers,
                                     self.total_grey_list,
                                     self.total_black_list,
@@ -271,13 +279,6 @@ pub(crate) struct GetStatsResponse {
 }
 
 #[derive(Clone)]
-pub(crate) struct ChainStats {
-    pow_algo: PowAlgorithm,
-    height: u64,
-    length: u64,
-}
-
-#[derive(Clone)]
 pub(crate) enum StatData {
     TargetDifficultyChanged {
         target_difficulty: Difficulty,
@@ -293,15 +294,7 @@ pub(crate) enum StatData {
         pow_algo: PowAlgorithm,
         timestamp: EpochTime,
     },
-    MinerBlockRejected {
-        pow_algo: PowAlgorithm,
-        timestamp: EpochTime,
-    },
     PoolBlockAccepted {
-        pow_algo: PowAlgorithm,
-        timestamp: EpochTime,
-    },
-    PoolBlockRejected {
         pow_algo: PowAlgorithm,
         timestamp: EpochTime,
     },
@@ -333,9 +326,7 @@ impl StatData {
     pub fn timestamp(&self) -> EpochTime {
         match self {
             StatData::MinerBlockAccepted { timestamp, .. } => *timestamp,
-            StatData::MinerBlockRejected { timestamp, .. } => *timestamp,
             StatData::PoolBlockAccepted { timestamp, .. } => *timestamp,
-            StatData::PoolBlockRejected { timestamp, .. } => *timestamp,
             StatData::ChainChanged { timestamp, .. } => *timestamp,
             StatData::NewPeer { timestamp, .. } => *timestamp,
             StatData::TargetDifficultyChanged { timestamp, .. } => *timestamp,

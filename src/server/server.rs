@@ -39,7 +39,6 @@ where S: ShareChain
     http_server: Option<Arc<HttpServer>>,
     stats_collector: Option<StatsCollector>,
     shutdown_signal: ShutdownSignal,
-    stats_broadcast_client: StatsBroadcastClient,
     are_we_synced_with_p2pool: Arc<AtomicBool>,
 }
 
@@ -105,7 +104,6 @@ where S: ShareChain
             Some(Arc::new(HttpServer::new(
                 stats_client,
                 config.http_server.port,
-                config.p2p_service.squad.clone(),
                 query_client,
                 shutdown_signal.clone(),
             )))
@@ -121,7 +119,6 @@ where S: ShareChain
             http_server,
             stats_collector: Some(stats_collector),
             shutdown_signal,
-            stats_broadcast_client,
             are_we_synced_with_p2pool,
         })
     }
@@ -201,9 +198,5 @@ where S: ShareChain
         info!(target: LOG_TARGET, "Server stopped!");
 
         Ok(())
-    }
-
-    pub fn p2p_service(&self) -> &p2p::Service<S> {
-        &self.p2p_service
     }
 }

@@ -33,57 +33,9 @@ impl From<Arc<P2Block>> for StatsBlock {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct EstimatedEarnings {
-    #[serde(rename = "1min")]
-    pub one_minute: MicroMinotari,
-    #[serde(rename = "1h")]
-    pub one_hour: MicroMinotari,
-    #[serde(rename = "1d")]
-    pub one_day: MicroMinotari,
-    #[serde(rename = "1w")]
-    pub one_week: MicroMinotari,
-    #[serde(rename = "30d")]
-    pub one_month: MicroMinotari,
-}
-
-impl EstimatedEarnings {
-    pub fn new(one_minute_earning: MicroMinotari) -> Self {
-        Self {
-            one_minute: one_minute_earning,
-            one_hour: MicroMinotari::from(one_minute_earning.as_u64() * 60),
-            one_day: MicroMinotari::from(one_minute_earning.as_u64() * 60 * 24),
-            one_week: MicroMinotari::from(one_minute_earning.as_u64() * 60 * 24 * 7),
-            one_month: MicroMinotari::from(one_minute_earning.as_u64() * 60 * 24 * 30),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct BlockStats {
-    pub accepted: u64,
-    pub rejected: u64,
-    pub submitted: u64,
-}
-
-impl BlockStats {
-    pub fn new(accepted: u64, rejected: u64) -> Self {
-        Self {
-            accepted,
-            rejected,
-            submitted: accepted + rejected,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
 pub struct SquadDetails {
     pub id: String,
     pub name: String,
-}
-impl SquadDetails {
-    pub fn new(id: String, name: String) -> Self {
-        Self { id, name }
-    }
 }
 
 #[derive(Serialize, Clone)]

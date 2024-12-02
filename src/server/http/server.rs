@@ -39,7 +39,6 @@ pub enum Error {
 pub struct HttpServer {
     stats_client: StatsClient,
     port: u16,
-    squad: Squad,
     p2p_service_client: Sender<P2pServiceQuery>,
     shutdown_signal: ShutdownSignal,
 }
@@ -47,7 +46,6 @@ pub struct HttpServer {
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub stats_client: StatsClient,
-    pub squad: Squad,
     pub p2p_service_client: Sender<P2pServiceQuery>,
 }
 
@@ -55,14 +53,12 @@ impl HttpServer {
     pub fn new(
         stats_client: StatsClient,
         port: u16,
-        squad: Squad,
         p2p_service_client: Sender<P2pServiceQuery>,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
             stats_client,
             port,
-            squad,
             p2p_service_client,
             shutdown_signal,
         }
@@ -80,7 +76,6 @@ impl HttpServer {
             .route("/connections", get(handlers::handle_connections))
             .with_state(AppState {
                 stats_client: self.stats_client.clone(),
-                squad: self.squad.clone(),
                 p2p_service_client: self.p2p_service_client.clone(),
             })
     }

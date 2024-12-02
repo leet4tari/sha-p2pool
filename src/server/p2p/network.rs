@@ -126,9 +126,9 @@ pub struct Squad {
     inner: String,
 }
 
-impl Squad {
-    pub fn to_string(&self) -> String {
-        self.inner.clone()
+impl Display for Squad {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", &self.inner)
     }
 }
 
@@ -143,12 +143,6 @@ impl From<String> for Squad {
         Self {
             inner: value.to_case(Case::Lower).to_case(Case::Snake),
         }
-    }
-}
-
-impl Display for Squad {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.inner.clone())
     }
 }
 

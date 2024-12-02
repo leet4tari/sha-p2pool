@@ -7,7 +7,6 @@
 pub use network::*;
 
 pub mod client;
-mod global_ip;
 pub mod messages;
 mod network;
 pub mod peer_store;

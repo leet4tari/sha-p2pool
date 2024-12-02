@@ -7,7 +7,7 @@ use std::{
     io::{BufReader, Write},
     path::Path,
     str::FromStr,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use anyhow::Error;
@@ -387,9 +387,6 @@ impl PeerStore {
     // }
     /// Returns count of peers.
     /// Note: it is needed to calculate number of validations needed to make sure a new block is valid.
-    pub async fn peer_count(&self) -> u64 {
-        self.whitelist_peers.len() as u64
-    }
 
     pub fn move_to_grey_list(&mut self, peer_id: PeerId, reason: String) {
         if self.whitelist_peers.contains_key(&peer_id.to_base58()) {
@@ -408,17 +405,17 @@ impl PeerStore {
         }
     }
 
-    pub fn is_blacklisted(&self, peer_id: &PeerId) -> bool {
-        self.blacklist_peers.contains_key(&peer_id.to_base58())
-    }
+    // pub fn is_blacklisted(&self, peer_id: &PeerId) -> bool {
+    //     self.blacklist_peers.contains_key(&peer_id.to_base58())
+    // }
 
-    pub fn is_whitelisted(&self, peer_id: &PeerId) -> bool {
-        if self.whitelist_peers.contains_key(&peer_id.to_base58()) {
-            return true;
-        }
-        if self.whitelist_peers.is_empty() && self.greylist_peers.contains_key(&peer_id.to_base58()) {
-            return true;
-        }
-        false
-    }
+    // pub fn is_whitelisted(&self, peer_id: &PeerId) -> bool {
+    //     if self.whitelist_peers.contains_key(&peer_id.to_base58()) {
+    //         return true;
+    //     }
+    //     if self.whitelist_peers.is_empty() && self.greylist_peers.contains_key(&peer_id.to_base58()) {
+    //         return true;
+    //     }
+    //     false
+    // }
 }

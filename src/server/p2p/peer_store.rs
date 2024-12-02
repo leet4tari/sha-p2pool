@@ -196,21 +196,6 @@ impl PeerStore {
         peers.into_iter().cloned().collect()
     }
 
-    pub fn time_since_last_sync_attempt(&self, peer_id: &PeerId, algo: PowAlgorithm) -> Option<Duration> {
-        match algo {
-            PowAlgorithm::RandomX => self
-                .whitelist_peers
-                .get(&peer_id.to_base58())
-                .and_then(|record| record.last_rx_sync_attempt)
-                .map(|instant| instant.elapsed()),
-            PowAlgorithm::Sha3x => self
-                .whitelist_peers
-                .get(&peer_id.to_base58())
-                .and_then(|record| record.last_sha3x_sync_attempt)
-                .map(|instant| instant.elapsed()),
-        }
-    }
-
     pub fn reset_last_sync_attempt(&mut self, peer_id: &PeerId) {
         if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
             let mut new_record = entry.clone();

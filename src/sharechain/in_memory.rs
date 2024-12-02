@@ -750,14 +750,6 @@ impl ShareChain for InMemoryShareChain {
         self.all_blocks_with_lock(&p2_chain_read, start_height, page_size, main_chain_only)
     }
 
-    async fn has_block(&self, height: u64, hash: &FixedHash) -> bool {
-        let chain_read_lock = self.p2_chain.read().await;
-        if let Some(level) = chain_read_lock.level_at_height(height) {
-            return level.blocks.contains_key(hash);
-        }
-        false
-    }
-
     async fn create_catchup_sync_blocks(&self, size: usize) -> Vec<(u64, FixedHash)> {
         let p2_chain_read_lock = self.p2_chain.read().await;
         let mut i_have_blocks = Vec::with_capacity(size);

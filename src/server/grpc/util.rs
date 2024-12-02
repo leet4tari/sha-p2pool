@@ -58,7 +58,7 @@ pub fn convert_coinbase_extra(squad: Squad, custom_coinbase_extra: String) -> Re
     let squad_type_marker = 0x02u8;
     let custom_message_type_marker = 0x01u8;
 
-    let mut current_squad = squad.as_string().into_bytes();
+    let mut current_squad = squad.to_string().into_bytes();
     let current_squad_len = u8::try_from(current_squad.len())?;
     let mut result = vec![type_length_value_marker, squad_type_marker, current_squad_len];
     result.append(&mut current_squad);

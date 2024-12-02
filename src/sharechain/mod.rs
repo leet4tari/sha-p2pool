@@ -138,8 +138,6 @@ pub(crate) trait ShareChain: Send + Sync + 'static {
         main_chain_only: bool,
     ) -> Result<Vec<Arc<P2Block>>, ShareChainError>;
 
-    async fn has_block(&self, height: u64, hash: &FixedHash) -> bool;
-
     async fn chain_pow(&self) -> AccumulatedDifficulty;
 
     async fn create_catchup_sync_blocks(&self, size: usize) -> Vec<(u64, FixedHash)>;

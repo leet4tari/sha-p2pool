@@ -56,7 +56,7 @@ use log::{
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_core::proof_of_work::{AccumulatedDifficulty, PowAlgorithm};
+use tari_core::proof_of_work::PowAlgorithm;
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::{
@@ -113,7 +113,6 @@ const PEER_INFO_LOGGING_LOG_TARGET: &str = "tari::p2pool::topics::peer_info";
 const NEW_TIP_NOTIFY_LOGGING_LOG_TARGET: &str = "tari::p2pool::topics::new_tip_notify";
 pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 // The amount of time between catch up syncs to the same peer
-const CATCHUP_SYNC_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
@@ -128,11 +127,7 @@ pub struct Squad {
 }
 
 impl Squad {
-    pub fn formatted(&self) -> String {
-        self.inner.to_case(Case::Lower).replace("_", " ").to_case(Case::Title)
-    }
-
-    pub fn as_string(&self) -> String {
+    pub fn to_string(&self) -> String {
         self.inner.clone()
     }
 }
@@ -174,7 +169,6 @@ pub(crate) struct Config {
     pub sync_interval: Duration,
     pub is_seed_peer: bool,
     pub debug_print_chain: bool,
-    pub num_peers_to_sync: usize,
     pub sync_job_enabled: bool,
     pub peer_list_folder: PathBuf,
     pub sha3x_enabled: bool,
@@ -201,7 +195,6 @@ impl Default for Config {
             sync_interval: Duration::from_secs(30),
             is_seed_peer: false,
             debug_print_chain: false,
-            num_peers_to_sync: 2,
             sync_job_enabled: true,
             sha3x_enabled: true,
             randomx_enabled: true,
@@ -230,13 +223,6 @@ struct PerformCatchUpSync {
     pub peer: PeerId,
     pub last_block_from_them: Option<(u64, FixedHash)>,
     pub their_height: u64,
-}
-
-struct SendCatchUpSyncRequest {
-    pub peer: PeerId,
-    pub algo: PowAlgorithm,
-    pub i_have_blocks: Vec<(u64, FixedHash)>,
-    pub last_block_received: Option<(u64, FixedHash)>,
 }
 
 #[derive(NetworkBehaviour)]
@@ -434,7 +420,7 @@ where S: ShareChain
             current_height_random_x,
             current_pow_sha3x,
             current_pow_random_x,
-            self.config.squad.as_string(),
+            self.config.squad.to_string(),
             public_addresses,
             Some(self.config.user_agent.clone()),
         );
@@ -2341,12 +2327,12 @@ mod test {
     #[test]
     fn squad_as_string_no_spaces_no_underscores() {
         let squad = Squad::from("default".to_string());
-        assert_eq!(squad.as_string(), "default");
+        assert_eq!(squad.to_string(), "default");
     }
 
     #[test]
     fn squad_as_string_with_spaces_with_underscores() {
         let squad = Squad::from("default 2".to_string());
-        assert_eq!(squad.as_string(), "default_2");
+        assert_eq!(squad.to_string(), "default_2");
     }
 }

@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::tari_address::TariAddress;
-use tari_core::transactions::tari_amount::MicroMinotari;
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 
 use crate::{

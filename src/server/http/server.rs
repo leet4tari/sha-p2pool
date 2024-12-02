@@ -10,7 +10,7 @@ use tokio::{io, sync::mpsc::Sender};
 use super::stats_collector::StatsClient;
 use crate::server::{
     http::{health, stats::handlers, version},
-    p2p::{P2pServiceQuery, Squad},
+    p2p::P2pServiceQuery,
 };
 
 const LOG_TARGET: &str = "tari::p2pool::server::stats";

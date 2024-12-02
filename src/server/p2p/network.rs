@@ -782,7 +782,7 @@ where S: ShareChain
         let source_peer = request.my_info.peer_id;
         let num_peers = request.best_peers.len();
 
-        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_TOPIC] New peer info: {source_peer:?} with {num_peers} new peers");
+        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {source_peer:?} with {num_peers} new peers");
         let local_peer_id = *self.swarm.local_peer_id();
         if let Ok(info) = self
             .create_peer_info(self.swarm.external_addresses().cloned().collect())
@@ -842,7 +842,7 @@ where S: ShareChain
             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", response.peer_id);
             return;
         }
-        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_TOPIC] New peer info: {} with {} peers", response.peer_id, response.best_peers.len());
+        info!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {} with {} peers", response.peer_id, response.best_peers.len());
         match response.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
                 if response.info.squad != self.config.squad.to_string() {
@@ -1931,14 +1931,18 @@ where S: ShareChain
                         }
                         let mut num_dialed = 0;
                         let store_read_lock = self.network_peer_store.read().await;
+                        // Rather try and search good peers rather than randomly dialing
+                        // 1000 peers will take a long time to get through
                         for (_peer, record) in store_read_lock.whitelist_peers().iter() {
                             // dbg!("Connecting");
                             // dbg!("Dialing peer: {:?} on {:?}", record.peer_id, record.peer_info.public_addresses());
                             // let peer_id = peers.0;
-                            if !self.swarm.is_connected(&record.peer_id) && !store_read_lock.is_seed_peer(&record.peer_id)  {
+                            if !self.swarm.is_connected(&record.peer_id)
+                             && !store_read_lock.is_seed_peer(&record.peer_id)  {
                                 let _ = self.swarm.dial(record.peer_id);
                                 num_dialed += 1;
                                 // We can only do 80 connections
+                                // Dropping outbound because at capacity
                                 if num_dialed > 80 {
                                     break;
                                 }

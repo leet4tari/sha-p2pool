@@ -22,20 +22,6 @@ const LOG_TARGET: &str = "tari::p2pool::peer_store";
 // const PEER_BAN_TIME: Duration = Duration::from_secs(60 * 5);
 const MAX_GREY_LISTINGS: u64 = 5;
 
-#[derive(Copy, Clone, Debug)]
-pub struct PeerStoreConfig {
-    pub peer_record_ttl: Duration,
-    // pub peers_max_fail: u64,
-}
-
-impl Default for PeerStoreConfig {
-    fn default() -> Self {
-        Self {
-            peer_record_ttl: Duration::from_secs(60 * 60),
-        }
-    }
-}
-
 /// A record in peer store that holds all needed info of a peer.
 #[derive(Clone, Debug)]
 pub(crate) struct PeerStoreRecord {
@@ -95,7 +81,7 @@ pub struct PeerStore {
 
 impl PeerStore {
     /// Constructs a new peer store with config.
-    pub fn new(_config: &PeerStoreConfig, stats_broadcast_client: StatsBroadcastClient) -> Self {
+    pub fn new(stats_broadcast_client: StatsBroadcastClient) -> Self {
         Self {
             stats_broadcast_client,
             whitelist_peers: HashMap::new(),
@@ -206,33 +192,6 @@ impl PeerStore {
         peers.reverse();
 
         peers.retain(|peer| !other_nodes_peers.contains(&peer.peer_id));
-        peers.truncate(count);
-        peers.into_iter().cloned().collect()
-    }
-
-    pub fn best_peers_to_sync(&self, count: usize, algo: PowAlgorithm) -> Vec<PeerStoreRecord> {
-        let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
-        // ignore all peers records that are older than 1 minutes
-        let timestamp = EpochTime::from(EpochTime::now().as_u64() - 60);
-        peers.retain(|peer| peer.last_seen() > timestamp);
-        peers.retain(|peer| !peer.peer_info.public_addresses().is_empty());
-
-        match algo {
-            PowAlgorithm::RandomX => peers.sort_by(|a, b| {
-                b.peer_info
-                    .current_random_x_pow
-                    .cmp(&a.peer_info.current_random_x_pow)
-                    .then(b.last_seen().cmp(&a.last_seen()))
-            }),
-            PowAlgorithm::Sha3x => {
-                peers.sort_by(|a, b| {
-                    b.peer_info
-                        .current_sha3x_pow
-                        .cmp(&a.peer_info.current_sha3x_pow)
-                        .then(b.last_seen().cmp(&a.last_seen()))
-                });
-            },
-        }
         peers.truncate(count);
         peers.into_iter().cloned().collect()
     }

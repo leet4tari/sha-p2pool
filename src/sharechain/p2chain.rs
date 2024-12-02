@@ -1631,7 +1631,7 @@ mod test {
         assert_eq!(chain.level_at_height(9).unwrap().chain_block, prev_block.unwrap().hash);
 
         // lets create a new tip to reorg to branching off 2 from the tip
-        let mut prev_block = Some((*chain.level_at_height(7).unwrap().block_in_main_chain().unwrap()).clone());
+        let prev_block = Some((*chain.level_at_height(7).unwrap().block_in_main_chain().unwrap()).clone());
         let mut tari_block = Block::new(BlockHeader::new(0), AggregateBody::empty());
 
         tari_block.header.nonce = 100;

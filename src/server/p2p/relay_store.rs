@@ -17,13 +17,6 @@ impl RelayStore {
         self.selected_relay.as_mut()
     }
 
-    pub fn has_active_relay(&self) -> bool {
-        self.selected_relay
-            .as_ref()
-            .map(|r| r.is_circuit_established)
-            .unwrap_or(false)
-    }
-
     pub fn add_possible_relay(&mut self, peer: PeerId, address: Multiaddr) -> bool {
         self.possible_relays.entry(peer).or_default().insert(address)
     }

@@ -196,6 +196,7 @@ impl P2BlockBuilder {
         Ok(self)
     }
 
+    #[cfg(test)]
     pub fn with_tari_block(mut self, block: Block) -> Result<Self, ShareChainError> {
         self.block.populate_tari_data(block)?;
         Ok(self)

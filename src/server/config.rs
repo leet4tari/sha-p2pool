@@ -5,11 +5,7 @@ use std::{path::PathBuf, time::Duration};
 
 use libp2p::identity::Keypair;
 
-use crate::server::{
-    http,
-    p2p,
-    p2p::{peer_store::PeerStoreConfig, Squad},
-};
+use crate::server::{http, p2p, p2p::Squad};
 
 /// Config is the server configuration struct.
 #[derive(Clone)]
@@ -18,7 +14,6 @@ pub struct Config {
     pub p2p_port: u16,
     pub grpc_port: u16,
     pub idle_connection_timeout: Duration,
-    pub peer_store: PeerStoreConfig,
     pub p2p_service: p2p::Config,
     pub http_server: http::server::Config,
     pub max_incoming_connections: Option<u32>,
@@ -35,7 +30,6 @@ impl Default for Config {
             p2p_port: 0,      // bind to any free port
             grpc_port: 18145, // to possibly not collide with any other ports
             idle_connection_timeout: Duration::from_secs(60),
-            peer_store: PeerStoreConfig::default(),
             p2p_service: p2p::Config::default(),
             http_server: http::server::Config::default(),
             max_incoming_connections: Some(100),
@@ -78,11 +72,6 @@ impl ConfigBuilder {
 
     pub fn with_squad(&mut self, squad: Squad) -> &mut Self {
         self.config.p2p_service.squad = squad;
-        self
-    }
-
-    pub fn with_peer_store_config(&mut self, config: PeerStoreConfig) -> &mut Self {
-        self.config.peer_store = config;
         self
     }
 

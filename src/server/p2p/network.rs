@@ -1900,7 +1900,7 @@ where S: ShareChain
         let mut connection_stats_publish = tokio::time::interval(Duration::from_secs(10));
         connection_stats_publish.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut seek_connections_interval = tokio::time::interval(Duration::from_secs(10));
+        let mut seek_connections_interval = tokio::time::interval(Duration::from_secs(5));
         seek_connections_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut debug_chain_graph = if self.config.debug_print_chain {
@@ -1913,6 +1913,12 @@ where S: ShareChain
 
         let shutdown_signal = self.shutdown_signal.clone();
         tokio::pin!(shutdown_signal);
+        tokio::pin!(grey_list_clear_interval);
+        tokio::pin!(black_list_clear_interval);
+        tokio::pin!(sync_interval);
+        tokio::pin!(whitelist_save_interval);
+        tokio::pin!(connection_stats_publish);
+        tokio::pin!(seek_connections_interval);
 
         loop {
             select! {
@@ -1952,7 +1958,8 @@ where S: ShareChain
                             if !self.swarm.is_connected(&record.peer_id) && !store_read_lock.is_seed_peer(&record.peer_id)  {
                                 let _ = self.swarm.dial(record.peer_id.clone());
                                 num_dialed += 1;
-                                if num_dialed > 128 {
+                                // We can only do 80 connections
+                                if num_dialed > 80 {
                                     break;
                                 }
                             }

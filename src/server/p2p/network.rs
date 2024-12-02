@@ -8,7 +8,6 @@ use std::{
     hash::Hash,
     io::Write,
     net::IpAddr,
-    num::NonZeroU32,
     path::PathBuf,
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
@@ -88,7 +87,7 @@ use crate::{
         http::stats_collector::StatsBroadcastClient,
         p2p::{
             client::ServiceClient,
-            messages::{self, PeerInfo, ShareChainSyncRequest, ShareChainSyncResponse},
+            messages::{self, PeerInfo, SyncMissingBlocksRequest, SyncMissingBlocksResponse},
             peer_store::{AddPeerStatus, PeerStore},
             relay_store::RelayStore,
         },
@@ -116,7 +115,7 @@ pub const STABLE_PRIVATE_KEY_FILE: &str = "p2pool_private.key";
 const MAX_ACCEPTABLE_P2P_MESSAGE_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT: Duration = Duration::from_millis(100);
 const CATCH_UP_SYNC_BLOCKS_IN_I_HAVE: usize = 100;
-const MAX_CATCH_UP_ATTEMPTS: usize = 150;
+const MAX_CATCH_UP_ATTEMPTS: u64 = 150;
 // Time to start up and catch up before we start processing new tip messages
 const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 32;
 const NUM_PEERS_INITIAL_SYNC: usize = 100;
@@ -147,6 +146,7 @@ impl From<String> for Squad {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct Config {
     pub external_addr: Option<String>,
     pub seed_peers: Vec<String>,
@@ -204,14 +204,6 @@ struct SyncShareChain {
     pub is_from_new_block_notify: bool,
 }
 
-struct CatchUpSync {
-    pub algo: PowAlgorithm,
-    pub our_peer_id: PeerId,
-    pub blocks: Vec<Arc<P2Block>>,
-    pub tip: (u64, FixedHash),
-    pub achieved_pow: u128,
-}
-
 struct PerformCatchUpSync {
     pub algo: PowAlgorithm,
     pub peer: PeerId,
@@ -226,9 +218,9 @@ pub struct ServerNetworkBehaviour {
     pub connection_limits: connection_limits::Behaviour,
     pub mdns: Toggle<mdns::Behaviour<Tokio>>,
     pub gossipsub: gossipsub::Behaviour,
-    pub share_chain_sync: cbor::Behaviour<ShareChainSyncRequest, ShareChainSyncResponse>,
-    pub direct_peer_exchange: cbor::Behaviour<DirectPeerInfoRequest, DirectPeerInfoResponse>,
-    pub catch_up_sync: cbor::Behaviour<CatchUpSyncRequest, CatchUpSyncResponse>,
+    pub share_chain_sync: cbor::Behaviour<SyncMissingBlocksRequest, Result<SyncMissingBlocksResponse, String>>,
+    pub direct_peer_exchange: cbor::Behaviour<DirectPeerInfoRequest, Result<DirectPeerInfoResponse, String>>,
+    pub catch_up_sync: cbor::Behaviour<CatchUpSyncRequest, Result<CatchUpSyncResponse, String>>,
     pub identify: identify::Behaviour,
     pub relay_server: Toggle<relay::Behaviour>,
     pub relay_client: relay::client::Behaviour,
@@ -286,9 +278,7 @@ pub(crate) struct ConnectionCounters {
 }
 
 enum InnerRequest {
-    SyncChainRequest((ResponseChannel<ShareChainSyncResponse>, ShareChainSyncResponse)),
     DoSyncChain(SyncShareChain),
-    CatchUpSyncRequest((ResponseChannel<CatchUpSyncResponse>, CatchUpSync)),
     PerformCatchUpSync(PerformCatchUpSync),
 }
 
@@ -510,7 +500,7 @@ where S: ShareChain
         propagation_source: PeerId,
     ) -> Result<MessageAcceptance, Error> {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "New gossipsub message: {message:?}");
-        let _ = self.stats_broadcast_client.send_gossipsub_message_received();
+        let _unused = self.stats_broadcast_client.send_gossipsub_message_received();
         let source_peer = message.source;
         if let Some(source_peer) = source_peer {
             let topic = message.topic.to_string();
@@ -670,7 +660,8 @@ where S: ShareChain
                                             is_from_new_block_notify: true,
                                         };
 
-                                        let _ = self.inner_request_tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                                        let _unused =
+                                            self.inner_request_tx.send(InnerRequest::DoSyncChain(sync_share_chain));
                                     }
                                 },
                                 Err(error) => {
@@ -724,7 +715,7 @@ where S: ShareChain
             AddPeerStatus::NewPeer => {
                 self.initiate_direct_peer_exchange(&peer).await;
                 self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
-                let _ = self.swarm.dial(peer);
+                let _unused = self.swarm.dial(peer);
                 return true;
             },
             AddPeerStatus::Existing => {},
@@ -771,11 +762,20 @@ where S: ShareChain
 
     async fn handle_direct_peer_exchange_request(
         &mut self,
-        channel: ResponseChannel<DirectPeerInfoResponse>,
+        channel: ResponseChannel<Result<DirectPeerInfoResponse, String>>,
         request: DirectPeerInfoRequest,
     ) {
         if request.my_info.version != PROTOCOL_VERSION {
             debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", request.peer_id);
+            let _unused = self
+                .swarm
+                .behaviour_mut()
+                .direct_peer_exchange
+                .send_response(channel, Err("Peer has an outdated version".to_string()))
+                .inspect_err(|e| {
+                    error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send peer info response: {e:?}");
+                });
+
             return;
         }
 
@@ -807,21 +807,26 @@ where S: ShareChain
                 .swarm
                 .behaviour_mut()
                 .direct_peer_exchange
-                .send_response(channel, DirectPeerInfoResponse {
-                    peer_id: local_peer_id.to_base58(),
-                    info,
-                    best_peers: my_best_peers,
-                })
+                .send_response(
+                    channel,
+                    Ok(DirectPeerInfoResponse {
+                        peer_id: local_peer_id.to_base58(),
+                        info,
+                        best_peers: my_best_peers,
+                    }),
+                )
                 .is_err()
             {
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send peer info response");
             }
+        } else {
+            error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to create peer info");
         }
 
         match request.peer_id.parse::<PeerId>() {
             Ok(peer_id) => {
                 if self.add_peer(request.my_info, peer_id).await {
-                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                    // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 }
                 for mut peer in request.best_peers {
                     if let Some(peer_id) = peer.peer_id {
@@ -876,7 +881,7 @@ where S: ShareChain
                         last_block_from_them: None,
                         their_height: response.info.current_sha3x_height,
                     };
-                    let _ = self
+                    let _unused = self
                         .inner_request_tx
                         .send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
                 }
@@ -889,7 +894,7 @@ where S: ShareChain
                         last_block_from_them: None,
                         their_height: response.info.current_random_x_height,
                     };
-                    let _ = self
+                    let _unused = self
                         .inner_request_tx
                         .send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
                 }
@@ -901,36 +906,47 @@ where S: ShareChain
     }
 
     /// Handles share chain sync request (coming from other peer).
-    async fn handle_share_chain_sync_request(
+    async fn handle_sync_missing_blocks_request(
         &mut self,
-        channel: ResponseChannel<ShareChainSyncResponse>,
-        request: ShareChainSyncRequest,
+        channel: ResponseChannel<Result<SyncMissingBlocksResponse, String>>,
+        request: SyncMissingBlocksRequest,
+        from: &PeerId,
     ) {
         debug!(target: LOG_TARGET, squad = &self.config.squad; "Incoming Share chain sync request of len: {}", request.missing_blocks().len());
-        let tx = self.inner_request_tx.clone();
         let share_chain = match request.algo() {
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
         let local_peer_id = *self.swarm.local_peer_id();
         let squad = self.config.squad.clone();
-        tokio::spawn(async move {
-            let blocks = share_chain.get_blocks(request.missing_blocks()).await;
-            if blocks.is_empty() {
-                warn!(target: LOG_TARGET, squad; "No blocks found for sync request");
-                return;
-            }
-            let response = ShareChainSyncResponse::new(local_peer_id, request.algo(), &blocks);
+        let blocks = share_chain.get_blocks(request.missing_blocks()).await;
+        if blocks.is_empty() {
+            warn!(target: LOG_TARGET, squad; "No blocks found for sync request: {} {} from {}", request.algo(), request.missing_blocks().iter().map(|(height, hash)| format!("{}({:x}{:x}{:x}{:x})", height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>().join(","), from);
+            let _unused = self
+                .swarm
+                .behaviour_mut()
+                .share_chain_sync
+                .send_response(channel, Err("No blocks found".to_string()))
+                .inspect_err(|_e| {
+                    error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
+                });
+            return;
+        }
+        let response = SyncMissingBlocksResponse::new(local_peer_id, request.algo(), &blocks);
 
-            if tx.send(InnerRequest::SyncChainRequest((channel, response))).is_err() {
-                error!(target: LOG_TARGET, squad; "Failed to send block sync response");
-            }
-        });
+        let _unused = self
+            .swarm
+            .behaviour_mut()
+            .share_chain_sync
+            .send_response(channel, Ok(response))
+            .inspect_err(|_e| {
+                error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
+            });
     }
 
     /// Handle share chain sync response.
     /// All the responding blocks will be tried to put into local share chain.
-    async fn handle_share_chain_sync_response(&mut self, response: ShareChainSyncResponse) {
+    async fn handle_sync_missing_blocks_response(&mut self, response: SyncMissingBlocksResponse) {
         debug!(target: MESSAGE_LOGGING_LOG_TARGET, "Share chain sync response: {response:?}");
         let peer = *response.peer_id();
 
@@ -970,7 +986,7 @@ where S: ShareChain
                             is_from_new_block_notify: false,
                         };
 
-                        let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                        let _unused = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
                     }
                 },
                 Err(error) => {
@@ -1022,14 +1038,14 @@ where S: ShareChain
 
         // ask our connected peers rather than everyone swarming the original peer
         let mut sent_to_original_peer = false;
-        let connected_peers: Vec<_> = self.swarm.connected_peers().cloned().collect();
+        let connected_peers: Vec<_> = self.swarm.connected_peers().copied().collect();
         for connected_peer in connected_peers {
             if connected_peer == peer {
                 sent_to_original_peer = true;
             }
             let _outbound_id = self.swarm.behaviour_mut().share_chain_sync.send_request(
                 &connected_peer,
-                ShareChainSyncRequest::new(algo, missing_parents.clone()),
+                SyncMissingBlocksRequest::new(algo, missing_parents.clone()),
             );
         }
         if !sent_to_original_peer && !is_from_new_block_notify {
@@ -1037,7 +1053,7 @@ where S: ShareChain
                 .swarm
                 .behaviour_mut()
                 .share_chain_sync
-                .send_request(&peer, ShareChainSyncRequest::new(algo, missing_parents.clone()));
+                .send_request(&peer, SyncMissingBlocksRequest::new(algo, missing_parents.clone()));
         }
     }
 
@@ -1055,10 +1071,10 @@ where S: ShareChain
                 established_in,
                 ..
             } => {
-                if num_established == NonZeroU32::new(1).expect("Can't fail") {
-                    self.initiate_direct_peer_exchange(&peer_id).await;
-                    self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                }
+                // if num_established == NonZeroU32::new(1).expect("Can't fail") {
+                self.initiate_direct_peer_exchange(&peer_id).await;
+                // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                // }
                 info!(target: LOG_TARGET, squad = &self.config.squad; "Connection established: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})");
             },
             SwarmEvent::Dialing { peer_id, .. } => {
@@ -1085,7 +1101,7 @@ where S: ShareChain
                 send_back_addr,
                 error,
             } => {
-                debug!(target: LOG_TARGET, squad = &self.config.squad; "Incoming connection error: {connection_id:?} -> {local_addr:?} -> {send_back_addr:?} -> {error:?}");
+                info!(target: LOG_TARGET, squad = &self.config.squad; "Incoming connection error: {connection_id:?} -> {local_addr:?} -> {send_back_addr:?} -> {error:?}");
             },
             SwarmEvent::ListenerError { listener_id, error } => {
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Listener error: {listener_id:?} -> {error:?}");
@@ -1110,7 +1126,7 @@ where S: ShareChain
                     mdns::Event::Discovered(peers) => {
                         for (peer, addr) in peers {
                             self.swarm.add_peer_address(peer, addr);
-                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                            // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                         }
                     },
                     mdns::Event::Expired(peers) => {
@@ -1126,7 +1142,7 @@ where S: ShareChain
                         propagation_source,
                     } => match self.handle_new_gossipsub_message(message, propagation_source).await {
                         Ok(res) => {
-                            let _ = self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                            let _unused = self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
                             &message_id,
                             &propagation_source,
                             res,
@@ -1136,7 +1152,7 @@ where S: ShareChain
                         },
                         Err(error) => {
                             error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to handle gossipsub message: {error:?}");
-                            let _ = self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                            let _unused = self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
                                 &message_id,
                                 &propagation_source,
                                 MessageAcceptance::Reject,
@@ -1167,8 +1183,14 @@ where S: ShareChain
                         request_response::Message::Response {
                             request_id: _request_id,
                             response,
-                        } => {
-                            self.handle_direct_peer_exchange_response(response).await;
+                        } => match response {
+                            Ok(response) => {
+                                info!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES peer info response: {response:?}");
+                                self.handle_direct_peer_exchange_response(response).await;
+                            },
+                            Err(error) => {
+                                error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES peer info response error: {error:?}");
+                            },
                         },
                     },
                     request_response::Event::OutboundFailure { peer, error, .. } => {
@@ -1189,19 +1211,25 @@ where S: ShareChain
                 },
                 ServerNetworkBehaviourEvent::ShareChainSync(event) => {
                     match event {
-                        request_response::Event::Message { peer: _peer, message } => match message {
+                        request_response::Event::Message { peer, message } => match message {
                             request_response::Message::Request {
                                 request_id: _request_id,
                                 request,
                                 channel,
                             } => {
-                                self.handle_share_chain_sync_request(channel, request).await;
+                                self.handle_sync_missing_blocks_request(channel, request, &peer).await;
                             },
                             request_response::Message::Response {
                                 request_id: _,
                                 response,
-                            } => {
-                                self.handle_share_chain_sync_response(response).await;
+                            } => match response {
+                                Ok(response) => {
+                                    info!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES share chain sync response: {response:?}");
+                                    self.handle_sync_missing_blocks_response(response).await;
+                                },
+                                Err(error) => {
+                                    error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES share chain sync response error: {error:?}");
+                                },
                             },
                         },
                         request_response::Event::OutboundFailure { peer, error, .. } => {
@@ -1248,7 +1276,15 @@ where S: ShareChain
                                 self.handle_catch_up_sync_request(channel, request).await;
                             },
                             request_response::Message::Response { request_id, response } => {
-                                self.handle_catch_up_sync_response(response).await;
+                                match response {
+                                    Ok(response) => {
+                                        info!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES catch up sync response: {response:?}");
+                                        self.handle_catch_up_sync_response(response).await;
+                                    },
+                                    Err(error) => {
+                                        error!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES catch up sync response error: {error:?}");
+                                    },
+                                }
                                 self.release_catchup_sync_permit(request_id);
                             },
                         },
@@ -1353,7 +1389,7 @@ where S: ShareChain
 
     async fn handle_catch_up_sync_request(
         &mut self,
-        channel: ResponseChannel<CatchUpSyncResponse>,
+        channel: ResponseChannel<Result<CatchUpSyncResponse, String>>,
         request: CatchUpSyncRequest,
     ) {
         let our_peer_id = *self.swarm.local_peer_id();
@@ -1362,32 +1398,51 @@ where S: ShareChain
             PowAlgorithm::RandomX => self.share_chain_random_x.clone(),
             PowAlgorithm::Sha3x => self.share_chain_sha3x.clone(),
         };
-        let tx = self.inner_request_tx.clone();
         let squad = self.config.squad.clone();
 
-        tokio::spawn(async move {
-            let (blocks, our_tip, our_achieved_pow) = match share_chare
-                .request_sync(request.i_have(), 20, request.last_block_received())
-                .await
-            {
-                Ok((blocks, our_tip, our_achieved_pow)) => {
-                    (blocks, our_tip.unwrap_or_default(), our_achieved_pow.as_u128())
-                },
-                Err(error) => {
-                    error!(target: LOG_TARGET, squad; "Failed to get blocks, tip and pow from share chain: {error:?}");
-                    return;
-                },
-            };
+        let (blocks, our_tip, our_achieved_pow) = match share_chare
+            .request_sync(request.i_have(), 20, request.last_block_received())
+            .await
+        {
+            Ok((blocks, our_tip, our_achieved_pow)) => {
+                (blocks, our_tip.unwrap_or_default(), our_achieved_pow.as_u128())
+            },
+            Err(error) => {
+                error!(target: LOG_TARGET, squad; "Failed to get blocks, tip and pow from share chain: {error:?}");
+                if self
+                    .swarm
+                    .behaviour_mut()
+                    .catch_up_sync
+                    .send_response(
+                        channel,
+                        Err("Failed to get blocks, tip and pow from share chain".to_string()),
+                    )
+                    .is_err()
+                {
+                    error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
+                }
+                return;
+            },
+        };
 
-            let catch_up_sync = CatchUpSync {
-                algo,
-                our_peer_id,
-                blocks,
-                tip: our_tip,
-                achieved_pow: our_achieved_pow,
-            };
-            let _ = tx.send(InnerRequest::CatchUpSyncRequest((channel, catch_up_sync)));
-        });
+        if self
+            .swarm
+            .behaviour_mut()
+            .catch_up_sync
+            .send_response(
+                channel,
+                Ok(CatchUpSyncResponse::new(
+                    algo,
+                    our_peer_id,
+                    &blocks,
+                    our_tip,
+                    our_achieved_pow,
+                )),
+            )
+            .is_err()
+        {
+            error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
+        }
     }
 
     fn release_catchup_sync_permit(&mut self, request_id: OutboundRequestId) {
@@ -1474,7 +1529,7 @@ where S: ShareChain
                     missing_parents,
                     is_from_new_block_notify: false,
                 };
-                let _ = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
+                let _unused = tx.send(InnerRequest::DoSyncChain(sync_share_chain));
             }
 
             info!(target: SYNC_REQUEST_LOG_TARGET, squad = &squad; "Synced blocks added to share chain");
@@ -1498,7 +1553,7 @@ where S: ShareChain
                     last_block_from_them,
                     their_height,
                 };
-                let _ = tx.send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
+                let _unused = tx.send(InnerRequest::PerformCatchUpSync(perform_catch_up_sync));
             } else {
                 info!(target: SYNC_REQUEST_LOG_TARGET, "Catch up sync completed for chain {} from {} after {} catchups", algo, peer, num_catchups.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string()));
 
@@ -1730,7 +1785,7 @@ where S: ShareChain
         match query {
             P2pServiceQuery::ConnectionInfo(reply) => {
                 let connection_info = self.get_libp2p_connection_info();
-                let _ = reply.send(connection_info);
+                let _unused = reply.send(connection_info);
             },
 
             P2pServiceQuery::GetPeers(reply) => {
@@ -1755,7 +1810,7 @@ where S: ShareChain
                         last_ping: info.last_ping,
                     });
                 }
-                let _ = reply.send((white_list_res, grey_list_res));
+                let _unused = reply.send((white_list_res, grey_list_res));
             },
             P2pServiceQuery::GetConnections(reply) => {
                 let connected_peers = self.swarm.connected_peers();
@@ -1773,7 +1828,7 @@ where S: ShareChain
                         res.push(p);
                     }
                 }
-                let _ = reply.send(res);
+                let _unused = reply.send(res);
             },
             P2pServiceQuery::GetChain {
                 pow_algo,
@@ -1792,7 +1847,7 @@ where S: ShareChain
                         vec![]
                     },
                 };
-                let _ = response.send(blocks);
+                let _unused = response.send(blocks);
             },
         }
     }
@@ -1818,40 +1873,8 @@ where S: ShareChain
 
     async fn handle_inner_request(&mut self, req: InnerRequest) {
         match req {
-            InnerRequest::SyncChainRequest((channel, share_chain_sync_response)) => {
-                if self
-                    .swarm
-                    .behaviour_mut()
-                    .share_chain_sync
-                    .send_response(channel, share_chain_sync_response)
-                    .is_err()
-                {
-                    error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
-                }
-            },
             InnerRequest::DoSyncChain(sync_chain) => {
                 self.sync_share_chain(sync_chain).await;
-            },
-            InnerRequest::CatchUpSyncRequest((channel, sync)) => {
-                let CatchUpSync {
-                    algo,
-                    our_peer_id,
-                    blocks,
-                    tip,
-                    achieved_pow,
-                } = sync;
-                if self
-                    .swarm
-                    .behaviour_mut()
-                    .catch_up_sync
-                    .send_response(
-                        channel,
-                        CatchUpSyncResponse::new(algo, our_peer_id, &blocks, tip, achieved_pow),
-                    )
-                    .is_err()
-                {
-                    error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send block sync response");
-                }
             },
             InnerRequest::PerformCatchUpSync(perform_catch_up_sync) => {
                 if let Err(e) = self.perform_catch_up_sync(perform_catch_up_sync).await {
@@ -1862,6 +1885,7 @@ where S: ShareChain
     }
 
     /// Main loop of the service that drives the events and libp2p swarm forward.
+    #[allow(clippy::too_many_lines)]
     async fn main_loop(&mut self) -> Result<(), Error> {
         let mut publish_peer_info_interval = tokio::time::interval(self.config.peer_info_publish_interval);
         publish_peer_info_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -1909,7 +1933,6 @@ where S: ShareChain
                 }
                 req = self.query_rx.recv() => {
                     let timer = Instant::now();
-                    dbg!("query");
                     match req {
                         Some(req) => {
                     self.handle_query(req).await;
@@ -1933,13 +1956,13 @@ where S: ShareChain
                         let store_read_lock = self.network_peer_store.read().await;
                         // Rather try and search good peers rather than randomly dialing
                         // 1000 peers will take a long time to get through
-                        for (_peer, record) in store_read_lock.whitelist_peers().iter() {
+                        for record in store_read_lock.whitelist_peers().values() {
                             // dbg!("Connecting");
                             // dbg!("Dialing peer: {:?} on {:?}", record.peer_id, record.peer_info.public_addresses());
                             // let peer_id = peers.0;
                             if !self.swarm.is_connected(&record.peer_id)
                              && !store_read_lock.is_seed_peer(&record.peer_id)  {
-                                let _ = self.swarm.dial(record.peer_id);
+                                let _unused = self.swarm.dial(record.peer_id);
                                 num_dialed += 1;
                                 // We can only do 80 connections
                                 // Dropping outbound because at capacity
@@ -1970,7 +1993,6 @@ where S: ShareChain
 
                 blocks = self.client_broadcast_block_rx.recv() => {
                     let timer = Instant::now();
-                    dbg!("client broadcast");
                     self.broadcast_block(blocks).await;
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
                         warn!(target: LOG_TARGET, "Client broadcast took too long: {:?}", timer.elapsed());
@@ -2001,7 +2023,7 @@ where S: ShareChain
                 _ = sync_interval.tick() =>  {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer && self.config.sync_job_enabled {
-                        for peer in self.swarm.connected_peers().cloned().collect::<Vec::<_>>() {
+                        for peer in self.swarm.connected_peers().copied().collect::<Vec::<_>>() {
                             // Update their latest tip.
                             self.initiate_direct_peer_exchange(&peer).await;
 
@@ -2056,7 +2078,7 @@ where S: ShareChain
                 _ = connection_stats_publish.tick() => {
                     let timer = Instant::now();
                    let connection_info = self.get_libp2p_connection_info();
-                   let _ = self.stats_broadcast_client.send_libp2p_stats(
+                   let _unused = self.stats_broadcast_client.send_libp2p_stats(
                     connection_info.network_info.connection_counters.pending_incoming,
                     connection_info.network_info.connection_counters.pending_outgoing,
                     connection_info.network_info.connection_counters.established_incoming,
@@ -2218,7 +2240,7 @@ where S: ShareChain
             // self.swarm.behaviour_mut().kademlia.add_address(peer_id, addr.clone());
             self.swarm.add_peer_address(*peer_id, addr.clone());
             peers_to_add.push(*peer_id);
-            let _ = self
+            let _unused = self
                 .swarm
                 .dial(DialOpts::peer_id(*peer_id).condition(PeerCondition::Always).build())
                 .inspect_err(|e| {
@@ -2295,7 +2317,7 @@ where S: ShareChain
 
         warn!(target: LOG_TARGET, "Starting main loop");
 
-        let _ = self
+        let _unused = self
             .network_peer_store
             .write()
             .await

@@ -470,7 +470,7 @@ impl ShareChain for InMemoryShareChain {
         }
 
         if !add_result.missing_blocks.is_empty() {
-            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, add_result.missing_blocks.iter().map(|(hash,height)| format!("{}({:x}{:x}{:x}{:x})",height.to_string(), hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
+            info!(target: LOG_TARGET, "[{:?}] Missing blocks for the following heights: {:?}", self.pow_algo, add_result.missing_blocks.iter().map(|(hash,height)| format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
         }
         Ok(add_result)
     }
@@ -577,7 +577,7 @@ impl ShareChain for InMemoryShareChain {
         let chain_read_lock = self.p2_chain.read().await;
 
         // edge case for chain start
-        let prev_block = chain_read_lock.get_tip().map(|tip| tip.block_in_main_chain()).flatten();
+        let prev_block = chain_read_lock.get_tip().and_then(|tip| tip.block_in_main_chain());
         let new_height = match prev_block {
             Some(prev_block) => prev_block.height.saturating_add(1),
             None => 0,
@@ -617,7 +617,7 @@ impl ShareChain for InMemoryShareChain {
                 }
 
                 // parent block needs to exist
-                let parent = match chain_read_lock.get_parent_block(&*uncle) {
+                let parent = match chain_read_lock.get_parent_block(uncle) {
                     Some(parent) => parent,
                     None => {
                         excluded_uncles.push(uncle.hash);

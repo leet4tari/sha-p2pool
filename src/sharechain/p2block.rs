@@ -160,7 +160,7 @@ impl P2BlockBuilder {
         match prev_block {
             Some(prev_block) => {
                 block.prev_hash = prev_block.hash;
-                block.total_pow = prev_block.total_pow.clone();
+                block.total_pow = prev_block.total_pow;
             },
             None => {
                 block.prev_hash = BlockHash::zero();

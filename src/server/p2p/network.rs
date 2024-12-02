@@ -661,7 +661,7 @@ where S: ShareChain
                                 .max()
                                 .unwrap_or(0);
 
-                            let mut blocks: Vec<P2Block> = payload.new_blocks.iter().cloned().collect();
+                            let mut blocks: Vec<P2Block> = payload.new_blocks.to_vec();
                             for block in &mut blocks {
                                 block.verified = false;
                             }
@@ -974,7 +974,7 @@ where S: ShareChain
         };
         let blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         let squad = self.config.squad.clone();
-        info!(target: LOG_TARGET, squad; "Received sync response for chain {} from {} with blocks {:?}", algo,  peer, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height.to_string(), a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
+        info!(target: LOG_TARGET, squad; "Received sync response for chain {} from {} with blocks {:?}", algo,  peer, blocks.iter().map(|a| format!("{}({:x}{:x}{:x}{:x})",a.height, a.hash[0], a.hash[1], a.hash[2], a.hash[3])).collect::<Vec<String>>());
         let tx = self.inner_request_tx.clone();
         let peer_store = self.network_peer_store.clone();
         tokio::spawn(async move {
@@ -1019,9 +1019,9 @@ where S: ShareChain
         } = sync_share_chain;
 
         if is_from_new_block_notify {
-            info!(target: SYNC_REQUEST_LOG_TARGET, "[{}] Sending sync to connected peers for blocks {:?} from notify", algo, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height.to_string(), hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
+            info!(target: SYNC_REQUEST_LOG_TARGET, "[{}] Sending sync to connected peers for blocks {:?} from notify", algo, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
         } else {
-            info!(target: SYNC_REQUEST_LOG_TARGET, "[{}] Sending sync to connected peers for blocks {:?} from sync", algo, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height.to_string(), hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
+            info!(target: SYNC_REQUEST_LOG_TARGET, "[{}] Sending sync to connected peers for blocks {:?} from sync", algo, missing_parents.iter().map(|(height, hash)|format!("{}({:x}{:x}{:x}{:x})",height, hash[0], hash[1], hash[2], hash[3])).collect::<Vec<String>>());
         }
         if missing_parents.is_empty() {
             warn!(target: LOG_TARGET, squad = &self.config.squad; "Sync called but with no missing parents.");
@@ -1414,7 +1414,7 @@ where S: ShareChain
         let should_remove: Vec<PeerId> = self
             .randomx_in_progress_syncs
             .iter()
-            .filter_map(|(peer, r)| if r.0 == request_id { Some(peer.clone()) } else { None })
+            .filter_map(|(peer, r)| if r.0 == request_id { Some(*peer) } else { None })
             .collect();
         for peer in should_remove {
             if let Some((_r, permit)) = self.randomx_in_progress_syncs.remove(&peer) {
@@ -1426,7 +1426,7 @@ where S: ShareChain
         let should_remove: Vec<PeerId> = self
             .sha3x_in_progress_syncs
             .iter()
-            .filter_map(|(peer, r)| if r.0 == request_id { Some(peer.clone()) } else { None })
+            .filter_map(|(peer, r)| if r.0 == request_id { Some(*peer) } else { None })
             .collect();
         for peer in should_remove {
             if let Some((_r, permit)) = self.sha3x_in_progress_syncs.remove(&peer) {
@@ -1487,7 +1487,7 @@ where S: ShareChain
             info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync added {:?}", algo, blocks_added);
             info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync result {}", algo, new_tip);
             let missing_parents = new_tip.to_missing_parents_vec();
-            if missing_parents.len() > 0 {
+            if !missing_parents.is_empty() {
                 let sync_share_chain = SyncShareChain {
                     algo,
                     peer,
@@ -1782,7 +1782,7 @@ where S: ShareChain
                 let mut res = vec![];
                 let store_read_lock = self.network_peer_store.read().await;
                 for p in connected_peers {
-                    let peer_info = store_read_lock.get(&p).map(|p| p.clone());
+                    let peer_info = store_read_lock.get(p).cloned();
                     if let Some(peer_info) = peer_info {
                         let p = ConnectedPeerInfo {
                             peer_id: p.to_string(),
@@ -1956,7 +1956,7 @@ where S: ShareChain
                             // dbg!("Dialing peer: {:?} on {:?}", record.peer_id, record.peer_info.public_addresses());
                             // let peer_id = peers.0;
                             if !self.swarm.is_connected(&record.peer_id) && !store_read_lock.is_seed_peer(&record.peer_id)  {
-                                let _ = self.swarm.dial(record.peer_id.clone());
+                                let _ = self.swarm.dial(record.peer_id);
                                 num_dialed += 1;
                                 // We can only do 80 connections
                                 if num_dialed > 80 {

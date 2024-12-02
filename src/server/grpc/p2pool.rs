@@ -144,7 +144,7 @@ where S: ShareChain
                     .get_blocks(&block.uncles)
                     .await
                     .into_iter()
-                    .map(|block| Arc::<P2Block>::unwrap_or_clone(block))
+                    .map(Arc::<P2Block>::unwrap_or_clone)
                     .collect();
                 new_blocks.append(&mut uncles);
                 if new_tip.new_tip.is_some() {

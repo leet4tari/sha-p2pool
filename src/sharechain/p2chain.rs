@@ -53,6 +53,7 @@ pub const MAX_SYNC_STORE: usize = 200;
 pub const MAX_MISSING_PARENTS: usize = 100;
 
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct ChainAddResult {
     pub new_tip: Option<(FixedHash, u64)>,
     pub missing_blocks: HashMap<FixedHash, u64>,
@@ -100,14 +101,6 @@ impl ChainAddResult {
     }
 }
 
-impl Default for ChainAddResult {
-    fn default() -> Self {
-        Self {
-            new_tip: None,
-            missing_blocks: HashMap::new(),
-        }
-    }
-}
 
 impl Display for ChainAddResult {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
@@ -297,7 +290,7 @@ impl P2Chain {
             // now lets check the uncles
             for uncle in &block.uncles {
                 if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
-                    if self.get_parent_block(&uncle_block).is_none() {
+                    if self.get_parent_block(uncle_block).is_none() {
                         new_tip
                             .missing_blocks
                             .insert(uncle_block.prev_hash, uncle_block.height.saturating_sub(1));
@@ -338,7 +331,7 @@ impl P2Chain {
                     .get_block_at_height(uncle.0, &uncle.1)
                     .ok_or(ShareChainError::BlockNotFound)?;
                 let uncle_parent = self
-                    .get_parent_block(&uncle_block)
+                    .get_parent_block(uncle_block)
                     .ok_or(ShareChainError::BlockNotFound)?;
                 let uncle_level = self
                     .level_at_height(uncle.0.saturating_sub(1))
@@ -375,7 +368,7 @@ impl P2Chain {
                         all_blocks_verified = false;
                         // so this block is unverified, we cannot count it but lets see if it just misses some blocks so
                         // we can ask for them
-                        if self.get_parent_block(&parent).is_none() {
+                        if self.get_parent_block(parent).is_none() {
                             new_tip
                                 .missing_blocks
                                 .insert(parent.prev_hash, parent.height.saturating_sub(1));
@@ -524,7 +517,7 @@ impl P2Chain {
         if block.verified {
             return Ok(());
         }
-        let mut verified = true;
+        let verified = true;
 
         // lets check the total accumulated difficulty
         let mut total_work = AccumulatedDifficulty::from_u128(block.target_difficulty().as_u64() as u128)
@@ -754,16 +747,7 @@ impl P2Chain {
     }
 
     pub fn get_tip(&self) -> Option<&P2ChainLevel> {
-        match self.level_at_height(self.current_tip) {
-            Some(level) => {
-                if level.chain_block == FixedHash::zero() {
-                    None
-                } else {
-                    Some(level)
-                }
-            },
-            None => None,
-        }
+        self.level_at_height(self.current_tip).filter(|&level| level.chain_block != FixedHash::zero())
     }
 
     pub fn get_height(&self) -> u64 {
@@ -1357,7 +1341,7 @@ mod test {
             if i > 1 {
                 let prev_uncle = chain.level_at_height(i - 2).unwrap().block_in_main_chain().unwrap();
                 // lets create an uncle block
-                let block = P2BlockBuilder::new(Some(&prev_uncle))
+                let block = P2BlockBuilder::new(Some(prev_uncle))
                     .with_timestamp(timestamp)
                     .with_height(i - 1)
                     .with_miner_wallet_address(address.clone())
@@ -1409,7 +1393,7 @@ mod test {
             if i > 1 {
                 let prev_uncle = chain.level_at_height(i - 2).unwrap().block_in_main_chain().unwrap();
                 // lets create an uncle block
-                let block = P2BlockBuilder::new(Some(&prev_uncle))
+                let block = P2BlockBuilder::new(Some(prev_uncle))
                     .with_timestamp(timestamp)
                     .with_height(i - 1)
                     .with_miner_wallet_address(address.clone())
@@ -1461,7 +1445,7 @@ mod test {
             if i > 1 {
                 let prev_uncle = chain.level_at_height(i - 2).unwrap().block_in_main_chain().unwrap();
                 // lets create an uncle block
-                let block = P2BlockBuilder::new(Some(&prev_uncle))
+                let block = P2BlockBuilder::new(Some(prev_uncle))
                     .with_timestamp(timestamp)
                     .with_height(i - 1)
                     .with_miner_wallet_address(address.clone())
@@ -1493,7 +1477,7 @@ mod test {
         let mut uncles = Vec::new();
         let prev_uncle = chain.level_at_height(6).unwrap().block_in_main_chain().unwrap();
         // lets create an uncle block
-        let block = P2BlockBuilder::new(Some(&prev_uncle))
+        let block = P2BlockBuilder::new(Some(prev_uncle))
             .with_timestamp(timestamp)
             .with_height(7)
             .with_miner_wallet_address(address.clone())

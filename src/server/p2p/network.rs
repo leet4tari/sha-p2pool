@@ -258,7 +258,7 @@ pub struct ServerNetworkBehaviour {
 }
 
 pub enum P2pServiceQuery {
-    GetConnectionInfo(oneshot::Sender<ConnectionInfo>),
+    ConnectionInfo(oneshot::Sender<ConnectionInfo>),
     GetPeers(oneshot::Sender<(Vec<ConnectedPeerInfo>, Vec<ConnectedPeerInfo>)>),
     GetConnections(oneshot::Sender<Vec<ConnectedPeerInfo>>),
     GetChain {
@@ -669,7 +669,7 @@ where S: ShareChain
                             match share_chain.add_synced_blocks(&blocks).await {
                                 Ok(new_tip) => {
                                     info!(target: LOG_TARGET,  squad = &self.config.squad; "[{:?}]New tip notify blocks added to share chain: {}", algo, new_tip);
-                                    let missing_parents = new_tip.to_missing_parents_vec();
+                                    let missing_parents = new_tip.into_missing_parents_vec();
                                     if !missing_parents.is_empty() {
                                         if missing_parents.len() > 5 {
                                             info!(target: LOG_TARGET, squad = &self.config.squad; "We are missing more than 5 blocks, we are missing: {}", missing_parents.len());
@@ -981,7 +981,7 @@ where S: ShareChain
             match share_chain.add_synced_blocks(&blocks).await {
                 Ok(new_tip) => {
                     info!(target: LOG_TARGET, squad; "[{:?}] Synced blocks added to share chain: {}",algo, new_tip);
-                    let missing_parents = new_tip.to_missing_parents_vec();
+                    let missing_parents = new_tip.into_missing_parents_vec();
                     if !missing_parents.is_empty() {
                         let sync_share_chain = SyncShareChain {
                             algo,
@@ -1486,7 +1486,7 @@ where S: ShareChain
             }
             info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync added {:?}", algo, blocks_added);
             info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync result {}", algo, new_tip);
-            let missing_parents = new_tip.to_missing_parents_vec();
+            let missing_parents = new_tip.into_missing_parents_vec();
             if !missing_parents.is_empty() {
                 let sync_share_chain = SyncShareChain {
                     algo,
@@ -1748,7 +1748,7 @@ where S: ShareChain
 
     async fn handle_query(&mut self, query: P2pServiceQuery) {
         match query {
-            P2pServiceQuery::GetConnectionInfo(reply) => {
+            P2pServiceQuery::ConnectionInfo(reply) => {
                 let connection_info = self.get_libp2p_connection_info();
                 let _ = reply.send(connection_info);
             },

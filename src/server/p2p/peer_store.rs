@@ -202,7 +202,8 @@ impl PeerStore {
         //         timestamp
         // });
         peers.retain(|peer| !peer.peer_info.public_addresses().is_empty());
-        peers.sort_by(|a, b| b.last_seen().cmp(&a.last_seen()));
+        peers.sort_by_key(|a| a.last_seen());
+        peers.reverse();
 
         peers.retain(|peer| !other_nodes_peers.contains(&peer.peer_id));
         peers.truncate(count);

@@ -184,6 +184,7 @@ impl P2BlockBuilder {
         self
     }
 
+    #[cfg(test)]
     pub fn with_target_difficulty(mut self, target_difficulty: Difficulty) -> Result<Self, ShareChainError> {
         self.added_target_difficulty = true;
         self.block.target_difficulty = target_difficulty;

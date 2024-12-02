@@ -237,7 +237,7 @@ pub(crate) async fn handle_get_stats(State(state): State<AppState>) -> Result<Js
     let (tx, rx) = oneshot::channel();
     state
         .p2p_service_client
-        .send(P2pServiceQuery::GetConnectionInfo(tx))
+        .send(P2pServiceQuery::ConnectionInfo(tx))
         .await
         .map_err(|error| {
             error!(target: LOG_TARGET, "Failed to get connection info: {error:?}");

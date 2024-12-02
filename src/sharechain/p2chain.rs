@@ -52,8 +52,7 @@ pub const MAX_SYNC_STORE: usize = 200;
 // this is the max missing parents we allow to process before we stop processing a chain and wait for more parents
 pub const MAX_MISSING_PARENTS: usize = 100;
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ChainAddResult {
     pub new_tip: Option<(FixedHash, u64)>,
     pub missing_blocks: HashMap<FixedHash, u64>,
@@ -93,14 +92,13 @@ impl ChainAddResult {
         };
     }
 
-    pub fn to_missing_parents_vec(self) -> Vec<(u64, FixedHash)> {
+    pub fn into_missing_parents_vec(self) -> Vec<(u64, FixedHash)> {
         self.missing_blocks
             .into_iter()
             .map(|(hash, height)| (height, hash))
             .collect()
     }
 }
-
 
 impl Display for ChainAddResult {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
@@ -164,6 +162,7 @@ impl P2Chain {
         level.blocks.get(hash)
     }
 
+    #[cfg(test)]
     fn get_chain_block_at_height(&self, height: u64) -> Option<&Arc<P2Block>> {
         let level = self.level_at_height(height)?;
         level.blocks.get(&level.chain_block)
@@ -747,7 +746,8 @@ impl P2Chain {
     }
 
     pub fn get_tip(&self) -> Option<&P2ChainLevel> {
-        self.level_at_height(self.current_tip).filter(|&level| level.chain_block != FixedHash::zero())
+        self.level_at_height(self.current_tip)
+            .filter(|&level| level.chain_block != FixedHash::zero())
     }
 
     pub fn get_height(&self) -> u64 {
@@ -1646,7 +1646,6 @@ mod test {
             .with_miner_wallet_address(address.clone())
             .build()
             .unwrap();
-        prev_block = Some(block.clone());
         assert_eq!(chain.add_block_to_chain(block.clone()).unwrap().missing_blocks.len(), 0);
 
         let level = chain.get_tip().unwrap();

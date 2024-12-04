@@ -1,0 +1,106 @@
+# syntax = docker/dockerfile:1.3
+
+# https://hub.docker.com/_/rust
+ARG RUST_VERSION=1.81
+ARG OS_BASE=bookworm
+
+# rust source compile with cross platform build support
+FROM --platform=$BUILDPLATFORM rust:$RUST_VERSION-${OS_BASE} as builder
+
+# Declare to make available
+ARG BUILDPLATFORM
+ARG BUILDOS
+ARG BUILDARCH
+ARG BUILDVARIANT
+ARG TARGETPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
+ARG RUST_TOOLCHAIN
+ARG RUST_TARGET
+ARG RUST_VERSION
+ARG OS_BASE
+
+#ENV RUSTFLAGS="-C target_cpu=$ARCH"
+#ENV ROARING_ARCH=$ARCH
+
+ENV CARGO_HTTP_MULTIPLEXING=false
+
+ARG VERSION=0.0.1
+ARG TARI_NETWORK
+ARG TARI_TARGET_NETWORK
+
+# Build profile, release by default
+ARG BUILD_PROFILE=release
+ENV BUILD_PROFILE=${BUILD_PROFILE}
+
+# Extra Cargo flags
+ARG RUSTFLAGS=""
+ENV RUSTFLAGS="${RUSTFLAGS}"
+
+# Extra Cargo features
+ARG FEATURES=""
+ENV FEATURES=${FEATURES}
+
+# Extra Cargo features
+#ARG platform_env="amd64"
+#ENV platform_env=$platform_env
+
+# Disable Prompt During Packages Installation
+ARG DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /tari
+COPY . .
+
+RUN apt-get update && \
+    sh /tari/scripts/install_ubuntu_dependencies.sh
+
+RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
+      # Run script to help setup cross-compile environment
+      . /tari/scripts/cross_compile_tooling.sh ; \
+    fi
+
+RUN if [ -n "${RUST_TOOLCHAIN}" ] ; then \
+      # Install a non-standard toolchain if it has been requested.
+      # By default we use the toolchain specified in rust-toolchain.toml
+      rustup toolchain install ${RUST_TOOLCHAIN} --force-non-host ; \
+    fi
+
+# Build application
+RUN cargo build --profile ${BUILD_PROFILE} \
+      --features "${FEATURES}" --locked --bin sha_p2pool
+
+# ARG is not resolved in COPY so we have to hack around it by copying the
+# binary to a temporary location
+#RUN cp /app/target/$BUILD_PROFILE/sha_p2pool /app/
+RUN cp -v /tari/target/${BUILD_TARGET}${BUILD_PROFILE}/sha_p2pool /tari/sha_p2pool
+
+# Create runtime base minimal image for the target platform executables
+FROM --platform=$TARGETPLATFORM bitnami/minideb:${OS_BASE} as runtime
+
+# Disable Prompt During Packages Installation
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y tini curl && \
+    # Docker image reduction
+    apt-get clean all && \
+    apt-get autoremove --assume-yes && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+RUN groupadd --gid 1000 tari && \
+    useradd --create-home --no-log-init --shell /bin/bash \
+      --home-dir /var/tari \
+      --uid 1000 --gid 1000 tari
+
+WORKDIR /tari
+
+# Copy tari over from the build stage
+COPY --from=builder /tari/sha_p2pool /usr/local/bin
+
+# Copy licenses
+COPY LICENSE-* ./
+
+USER tari
+
+ENTRYPOINT ["tini", "--", "/usr/local/bin/sha_p2pool"]

@@ -36,3 +36,17 @@ passthrough = [
 [target.x86_64-unknown-linux-gnu]
 image = "ubuntu:18.04"
 pre-build = "./scripts/cross_compile_ubuntu_18-pre-build.sh"
+
+[target.x86_64-unknown-linux-gnu.env]
+passthrough = [
+  "PKG_CONFIG_ALLOW_CROSS=true",
+]
+
+[target.riscv64gc-unknown-linux-gnu]
+image = "ubuntu:22.04"
+pre-build = "./scripts/cross_compile_ubuntu_18-pre-build.sh"
+
+[target.riscv64gc-unknown-linux-gnu.env]
+passthrough = [
+  "PKG_CONFIG_ALLOW_CROSS=true",
+]

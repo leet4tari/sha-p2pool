@@ -123,6 +123,38 @@ impl PeerStore {
         }
     }
 
+    pub fn max_known_network_height(&self, algo: PowAlgorithm) -> (u64, u128, Option<PeerId>) {
+        let mut max_height = 0;
+        let mut max_pow = 0;
+        let mut peer_with_highest = None;
+        for record in self.whitelist_peers.values() {
+            // Only consider peers that we have spoken to.
+            if record.last_ping.is_none() {
+                continue;
+            }
+            match algo {
+                PowAlgorithm::RandomX => {
+                    let achieved_pow = record.peer_info.current_random_x_pow;
+                    if achieved_pow > max_pow {
+                        max_pow = achieved_pow;
+                        max_height = record.peer_info.current_random_x_height;
+                        peer_with_highest = Some(record.peer_id);
+                    }
+                },
+                PowAlgorithm::Sha3x => {
+                    let achieved_pow = record.peer_info.current_sha3x_pow;
+                    if achieved_pow > max_pow {
+                        max_pow = achieved_pow;
+                        max_height = record.peer_info.current_sha3x_height;
+                        peer_with_highest = Some(record.peer_id);
+                    }
+                },
+            }
+        }
+
+        (max_height, max_pow, peer_with_highest)
+    }
+
     pub fn add_seed_peers(&mut self, mut peer_ids: Vec<PeerId>) {
         self.seed_peers.append(&mut peer_ids);
     }
@@ -187,7 +219,7 @@ impl PeerStore {
         //         .unwrap_or(peer.peer_info.timestamp) >
         //         timestamp
         // });
-        peers.retain(|peer| !peer.peer_info.public_addresses().is_empty());
+        peers.retain(|peer| !peer.peer_info.public_addresses().is_empty() && peer.last_ping.is_some());
         peers.sort_by_key(|a| a.last_seen());
         peers.reverse();
 

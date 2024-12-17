@@ -21,7 +21,13 @@ use tari_core::{
 use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use super::{MAIN_REWARD_SHARE, MIN_RANDOMX_DIFFICULTY, MIN_SHA3X_DIFFICULTY, UNCLE_REWARD_SHARE};
+use super::{
+    lmdb_block_storage::LmdbBlockStorage,
+    MAIN_REWARD_SHARE,
+    MIN_RANDOMX_DIFFICULTY,
+    MIN_SHA3X_DIFFICULTY,
+    UNCLE_REWARD_SHARE,
+};
 use crate::{
     server::{http::stats_collector::StatsBroadcastClient, Config, PROTOCOL_VERSION},
     sharechain::{
@@ -45,7 +51,7 @@ pub const UNCLE_START_HEIGHT: u64 = 10;
 pub const MAX_MISSING_PARENTS: usize = 10;
 
 pub(crate) struct InMemoryShareChain {
-    p2_chain: Arc<RwLock<P2Chain>>,
+    p2_chain: Arc<RwLock<P2Chain<LmdbBlockStorage>>>,
     pow_algo: PowAlgorithm,
     block_validation_params: Option<Arc<BlockValidationParams>>,
     consensus_manager: ConsensusManager,
@@ -73,6 +79,7 @@ impl InMemoryShareChain {
                 config.share_window * 2,
                 config.share_window,
                 config.block_time,
+                LmdbBlockStorage::new_from_temp_dir(),
             ))),
             pow_algo,
             block_validation_params,
@@ -171,7 +178,7 @@ impl InMemoryShareChain {
     /// Submits a new block to share chain.
     async fn submit_block_with_lock(
         &self,
-        p2_chain: &mut RwLockWriteGuard<'_, P2Chain>,
+        p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
         block: Arc<P2Block>,
         params: Option<Arc<BlockValidationParams>>,
         syncing: bool,
@@ -180,8 +187,8 @@ impl InMemoryShareChain {
 
         // Check if already added.
         if let Some(level) = p2_chain.level_at_height(new_block_p2pool_height) {
-            if level.blocks.contains_key(&block.hash) {
-                let block_in_chain = level.blocks.get(&block.hash).unwrap();
+            if level.contains(&block.hash) {
+                let block_in_chain = level.get(&block.hash).unwrap();
 
                 info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {}:{}, verified: {}", self.pow_algo, block.height, &block.hash.to_hex()[0..8], block_in_chain.verified);
 
@@ -198,7 +205,7 @@ impl InMemoryShareChain {
         }
 
         // this is safe as we already checked it does exist
-        let tip_height = p2_chain.get_tip().unwrap().height;
+        let tip_height = p2_chain.get_tip().unwrap().height();
         // We keep more blocks than the share window, but its only to validate the share window. If a block comes in
         // older than the share window is way too old for us to care about.
         if block.height < tip_height.saturating_sub(self.config.share_window) && !syncing {
@@ -234,7 +241,7 @@ impl InMemoryShareChain {
 
     async fn get_calculate_and_cache_hashmap_of_shares(
         &self,
-        p2_chain: &mut RwLockWriteGuard<'_, P2Chain>,
+        p2_chain: &mut RwLockWriteGuard<'_, P2Chain<LmdbBlockStorage>>,
     ) -> Result<HashMap<String, (u64, Vec<u8>)>, ShareChainError> {
         fn update_insert(
             miner_shares: &mut HashMap<String, (u64, Vec<u8>)>,
@@ -260,10 +267,9 @@ impl InMemoryShareChain {
         };
 
         // we want to count 1 short,as the final share will be for this node
-        let stop_height = tip_level.height.saturating_sub(self.config.share_window - 1);
+        let stop_height = tip_level.height().saturating_sub(self.config.share_window - 1);
         let mut cur_block = tip_level
-            .blocks
-            .get(&tip_level.chain_block)
+            .get(&tip_level.chain_block())
             .ok_or(ShareChainError::BlockNotFound)?;
         update_insert(
             &mut miners_to_shares,
@@ -275,7 +281,6 @@ impl InMemoryShareChain {
             let uncle_block = p2_chain
                 .level_at_height(uncle.0)
                 .ok_or(ShareChainError::UncleBlockNotFound)?
-                .blocks
                 .get(&uncle.1)
                 .ok_or(ShareChainError::UncleBlockNotFound)?;
             update_insert(
@@ -287,7 +292,7 @@ impl InMemoryShareChain {
         }
         while cur_block.height > stop_height {
             cur_block = p2_chain
-                .get_parent_block(cur_block)
+                .get_parent_block(&cur_block)
                 .ok_or(ShareChainError::BlockNotFound)?;
             update_insert(
                 &mut miners_to_shares,
@@ -299,7 +304,6 @@ impl InMemoryShareChain {
                 let uncle_block = p2_chain
                     .level_at_height(uncle.0)
                     .ok_or(ShareChainError::UncleBlockNotFound)?
-                    .blocks
                     .get(&uncle.1)
                     .ok_or(ShareChainError::UncleBlockNotFound)?;
                 update_insert(
@@ -316,7 +320,7 @@ impl InMemoryShareChain {
 
     fn all_blocks_with_lock(
         &self,
-        p2_chain: &RwLockReadGuard<'_, P2Chain>,
+        p2_chain: &RwLockReadGuard<'_, P2Chain<LmdbBlockStorage>>,
         start_height: Option<u64>,
         page_size: usize,
         main_chain_only: bool,
@@ -350,7 +354,7 @@ impl InMemoryShareChain {
                     res.push(block.clone());
                 }
             } else {
-                for block in level.blocks.values() {
+                for block in level.all_blocks() {
                     num_actual_blocks += 1;
                     res.push(block.clone());
                 }
@@ -359,7 +363,7 @@ impl InMemoryShareChain {
                 return Ok(res);
             }
 
-            level = if let Some(new_level) = p2_chain.level_at_height(level.height + 1) {
+            level = if let Some(new_level) = p2_chain.level_at_height(level.height() + 1) {
                 new_level
             } else {
                 break;
@@ -489,7 +493,7 @@ impl ShareChain for InMemoryShareChain {
         let bl = self.p2_chain.read().await;
         let tip_level = bl.get_tip();
         if let Some(tip_level) = tip_level {
-            Ok(Some((tip_level.height, tip_level.chain_block)))
+            Ok(Some((tip_level.height(), tip_level.chain_block())))
         } else {
             Ok(None)
         }
@@ -545,7 +549,6 @@ impl ShareChain for InMemoryShareChain {
                 let uncle_block = chain_read_lock
                     .level_at_height(uncle.0)
                     .ok_or(ShareChainError::UncleBlockNotFound)?
-                    .blocks
                     .get(&uncle.1)
                     .ok_or(ShareChainError::UncleBlockNotFound)?;
                 miners_to_shares.insert(
@@ -589,7 +592,7 @@ impl ShareChain for InMemoryShareChain {
         // edge case for chain start
         let prev_block = chain_read_lock.get_tip().and_then(|tip| tip.block_in_main_chain());
         let new_height = match prev_block {
-            Some(prev_block) => prev_block.height.saturating_add(1),
+            Some(ref prev_block) => prev_block.height.saturating_add(1),
             None => 0,
         };
 
@@ -614,7 +617,7 @@ impl ShareChain for InMemoryShareChain {
                     for uncle in &chain_block.uncles {
                         excluded_uncles.push(uncle.1);
                     }
-                    for block in older_level.blocks.values() {
+                    for block in older_level.all_blocks() {
                         uncles.push(block.clone());
                     }
                 }
@@ -638,7 +641,7 @@ impl ShareChain for InMemoryShareChain {
                 if chain_read_lock
                     .level_at_height(parent.height)
                     .ok_or(ShareChainError::BlockLevelNotFound)?
-                    .chain_block !=
+                    .chain_block() !=
                     parent.hash
                 {
                     excluded_uncles.push(uncle.hash);
@@ -653,7 +656,7 @@ impl ShareChain for InMemoryShareChain {
             uncles.truncate(UNCLE_LIMIT);
         }
 
-        Ok(P2BlockBuilder::new(prev_block)
+        Ok(P2BlockBuilder::new(prev_block.as_deref())
             .with_timestamp(EpochTime::now())
             .with_height(new_height)
             .with_uncles(&uncles)?
@@ -668,7 +671,7 @@ impl ShareChain for InMemoryShareChain {
 
         for block in requested_blocks {
             if let Some(level) = p2_chain_read_lock.level_at_height(block.0) {
-                if let Some(block) = level.blocks.get(&block.1) {
+                if let Some(block) = level.get(&block.1) {
                     blocks.push(block.clone());
                 } else {
                     // if sync requestee only sees their behind on tip, they will fill in fixedhash::zero(), so it wont
@@ -707,7 +710,7 @@ impl ShareChain for InMemoryShareChain {
         for their_block in their_blocks {
             if let Some(level) = p2_chain_read.level_at_height(their_block.0) {
                 // Only split if the block is in the main chain
-                if level.chain_block == their_block.1 {
+                if level.chain_block() == their_block.1 {
                     split_height2 = their_block.0.saturating_add(1);
                     break;
                 }
@@ -720,7 +723,7 @@ impl ShareChain for InMemoryShareChain {
             self.all_blocks_with_lock(&p2_chain_read, Some(cmp::max(split_height, split_height2)), limit, true)?;
         let tip_level = p2_chain_read
             .get_tip()
-            .map(|tip_level| (tip_level.height, tip_level.chain_block));
+            .map(|tip_level| (tip_level.height(), tip_level.chain_block()));
         let chain_pow = p2_chain_read.total_accumulated_tip_difficulty();
         Ok((blocks, tip_level, chain_pow))
     }
@@ -760,7 +763,7 @@ impl ShareChain for InMemoryShareChain {
         let p2_chain_read_lock = self.p2_chain.read().await;
         let mut i_have_blocks = Vec::with_capacity(size);
         if let Some(tip) = p2_chain_read_lock.get_tip() {
-            let tip_height = tip.height;
+            let tip_height = tip.height();
             let mut height = tip_height;
             for _ in 0..size {
                 if let Some(level) = p2_chain_read_lock.level_at_height(height) {
@@ -864,7 +867,7 @@ pub mod test {
         for i in 0..15 {
             let address = new_random_address();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i)
                 .with_miner_wallet_address(address.clone())
@@ -918,7 +921,7 @@ pub mod test {
         for i in 0..15 {
             let address = miners[i % 5].clone();
             timestamp = timestamp.checked_add(EpochTime::from(10)).unwrap();
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
@@ -996,7 +999,7 @@ pub mod test {
                 uncles.push(block.clone());
                 share_chain.submit_block(block).await.unwrap();
             }
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_timestamp(timestamp)
                 .with_height(i as u64)
                 .with_miner_wallet_address(address.clone())
@@ -1041,7 +1044,7 @@ pub mod test {
         let mut blocks = Vec::new();
         let mut prev_block = None;
         for i in 0..10 {
-            let block = P2BlockBuilder::new(prev_block.as_ref())
+            let block = P2BlockBuilder::new(prev_block.as_deref())
                 .with_height(i)
                 .with_target_difficulty(Difficulty::from_u64(1).unwrap())
                 .unwrap()
@@ -1085,7 +1088,7 @@ pub mod test {
         assert_eq!(heights, vec![8, 9]);
 
         // Add an extra block in their blocks
-        let missing_block = P2BlockBuilder::new(prev_block.as_ref())
+        let missing_block = P2BlockBuilder::new(prev_block.as_deref())
             .with_height(11)
             .with_target_difficulty(Difficulty::from_u64(10).unwrap())
             .unwrap()

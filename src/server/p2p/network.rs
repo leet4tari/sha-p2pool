@@ -1294,7 +1294,6 @@ where S: ShareChain
                             response,
                         } => match response {
                             Ok(response) => {
-                                info!(target: LOG_TARGET, squad = &self.config.squad; "REQ-RES peer info response: {response:?}");
                                 self.handle_direct_peer_exchange_response(response).await;
                             },
                             Err(error) => {

@@ -485,15 +485,8 @@ impl<T: BlockCache> P2Chain<T> {
         // let see if we already have a block is a missing block of some other block
         for check_height in (height + 1)..height + MAX_UNCLE_AGE {
             if let Some(level) = self.level_at_height(check_height) {
-                for block in &level.all_blocks() {
-                    for uncles in &block.uncles {
-                        if uncles.1 == hash {
-                            next_level_data.push((block.height, block.hash));
-                        }
-                    }
-                    if block.prev_hash == hash {
-                        next_level_data.push((block.height, block.hash));
-                    }
+                for children in level.all_children_and_nephews_of(&hash) {
+                    next_level_data.push(children);
                 }
             }
         }

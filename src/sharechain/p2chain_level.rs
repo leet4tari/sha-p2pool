@@ -28,13 +28,19 @@ use tari_common_types::types::{BlockHash, FixedHash};
 use super::lmdb_block_storage::BlockCache;
 use crate::sharechain::{error::ShareChainError, p2block::P2Block};
 
+struct P2BlockHeader {
+    height: u64,
+    hash: FixedHash,
+    prev_hash: FixedHash,
+    uncles: Vec<(u64, FixedHash)>,
+}
 /// A collection of blocks with the same height.
 pub struct P2ChainLevel<T: BlockCache> {
     // pub blocks: HashMap<BlockHash, Arc<P2Block>>,
     block_cache: Arc<T>,
     height: u64,
     chain_block: RwLock<BlockHash>,
-    block_hashes: RwLock<Vec<BlockHash>>,
+    block_headers: RwLock<Vec<P2BlockHeader>>,
 }
 
 impl<T: BlockCache> P2ChainLevel<T> {
@@ -43,14 +49,37 @@ impl<T: BlockCache> P2ChainLevel<T> {
         // later
         let chain_block = RwLock::new(FixedHash::zero());
         let height = block.height;
-        let hash = block.hash;
+        let header = P2BlockHeader {
+            height: block.height,
+            hash: block.hash,
+            prev_hash: block.prev_hash,
+            uncles: block.uncles.clone(),
+        };
         block_cache.insert(block.hash, block);
+
         Self {
             block_cache,
             height,
             chain_block,
-            block_hashes: RwLock::new(vec![hash]),
+            block_headers: RwLock::new(vec![header]),
         }
+    }
+
+    pub fn all_children_and_nephews_of(&self, hash: &FixedHash) -> Vec<(u64, FixedHash)> {
+        let mut res = vec![];
+        // TODO: Optimize
+        let lock = self.block_headers.read().expect("could not lock");
+        for block in lock.iter() {
+            for uncles in &block.uncles {
+                if &uncles.1 == hash {
+                    res.push((block.height, block.hash));
+                }
+            }
+            if &block.prev_hash == hash {
+                res.push((block.height, block.hash));
+            }
+        }
+        res
     }
 
     pub fn height(&self) -> u64 {
@@ -72,7 +101,13 @@ impl<T: BlockCache> P2ChainLevel<T> {
                 reason: "Block height does not match the chain level height".to_string(),
             });
         }
-        self.block_hashes.write().expect("could not lock").push(block.hash);
+        let header = P2BlockHeader {
+            height: block.height,
+            hash: block.hash,
+            prev_hash: block.prev_hash,
+            uncles: block.uncles.clone(),
+        };
+        self.block_headers.write().expect("could not lock").push(header);
         self.block_cache.insert(block.hash, block);
         Ok(())
     }
@@ -90,11 +125,11 @@ impl<T: BlockCache> P2ChainLevel<T> {
     }
 
     pub fn all_blocks(&self) -> Vec<Arc<P2Block>> {
-        self.block_hashes
+        self.block_headers
             .read()
             .expect("could not lock")
             .iter()
-            .filter_map(|hash| self.block_cache.get(hash))
+            .filter_map(|header| self.block_cache.get(&header.hash))
             .collect()
     }
 }

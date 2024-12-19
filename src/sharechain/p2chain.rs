@@ -164,6 +164,10 @@ impl<T: BlockCache> P2Chain<T> {
         level.get(hash)
     }
 
+    pub fn block_exists(&self, height: u64, hash: &FixedHash) -> bool {
+        self.level_at_height(height).map_or(false, |level| level.contains(hash))
+    }
+
     #[cfg(test)]
     fn get_chain_block_at_height(&self, height: u64) -> Option<Arc<P2Block>> {
         let level = self.level_at_height(height)?;
@@ -263,10 +267,7 @@ impl<T: BlockCache> P2Chain<T> {
         // do we know of the parent
         // we should not check the chain start for parents
         if block.height != 0 {
-            if self
-                .get_block_at_height(new_block_height.saturating_sub(1), &block.prev_hash)
-                .is_none()
-            {
+            if !self.block_exists(new_block_height.saturating_sub(1), &block.prev_hash) {
                 // we dont know the parent
                 new_tip
                     .missing_blocks
@@ -274,11 +275,11 @@ impl<T: BlockCache> P2Chain<T> {
             }
             // now lets check the uncles
             for uncle in &block.uncles {
-                if let Some(uncle_block) = self.get_block_at_height(uncle.0, &uncle.1) {
-                    if self.get_parent_block(&uncle_block).is_none() {
+                if let Some(uncle_parent_hash) = self.get_parent_of(uncle.0, &uncle.1) {
+                    if !self.block_exists(uncle.0.saturating_sub(1), &uncle_parent_hash) {
                         new_tip
                             .missing_blocks
-                            .insert(uncle_block.prev_hash, uncle_block.height.saturating_sub(1));
+                            .insert(uncle_parent_hash, uncle.0.saturating_sub(1));
                     }
                 } else {
                     new_tip.missing_blocks.insert(uncle.1, uncle.0);
@@ -584,6 +585,11 @@ impl<T: BlockCache> P2Chain<T> {
         }
 
         self.add_block_inner(block)
+    }
+
+    pub fn get_parent_of(&self, height: u64, hash: &FixedHash) -> Option<FixedHash> {
+        let level = self.level_at_height(height)?;
+        level.get_prev_hash(hash)
     }
 
     pub fn get_parent_block(&self, block: &P2Block) -> Option<Arc<P2Block>> {

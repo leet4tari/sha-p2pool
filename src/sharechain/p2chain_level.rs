@@ -82,6 +82,16 @@ impl<T: BlockCache> P2ChainLevel<T> {
         res
     }
 
+    pub fn get_prev_hash(&self, hash: &FixedHash) -> Option<FixedHash> {
+        let lock = self.block_headers.read().expect("could not lock");
+        for block in lock.iter() {
+            if &block.hash == hash {
+                return Some(block.prev_hash);
+            }
+        }
+        None
+    }
+
     pub fn height(&self) -> u64 {
         self.height
     }
@@ -121,7 +131,11 @@ impl<T: BlockCache> P2ChainLevel<T> {
     }
 
     pub fn contains(&self, hash: &BlockHash) -> bool {
-        self.block_cache.contains(hash)
+        self.block_headers
+            .read()
+            .expect("could not lock")
+            .iter()
+            .any(|b| b.hash == *hash)
     }
 
     pub fn all_blocks(&self) -> Vec<Arc<P2Block>> {

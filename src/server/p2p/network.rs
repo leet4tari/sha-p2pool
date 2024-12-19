@@ -807,7 +807,8 @@ where S: ShareChain
         request: DirectPeerInfoRequest,
     ) {
         if request.my_info.version != PROTOCOL_VERSION {
-            debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping", request.peer_id);
+            // debug!(target: LOG_TARGET, squad = &self.config.squad; "Peer {} has an outdated version, skipping",
+            // request.peer_id);
             let _unused = self
                 .swarm
                 .behaviour_mut()
@@ -2268,11 +2269,9 @@ where S: ShareChain
                 },
                 event = self.swarm.select_next_some() => {
                     let timer = Instant::now();
-                    let mut event_string = format!("{:?}", event);
-                    event_string.truncate(300);
                     self.handle_event(event).await;
                     if timer.elapsed() > MAX_ACCEPTABLE_NETWORK_EVENT_TIMEOUT {
-                        warn!(target: LOG_TARGET, "Event handling took too long: {:?} ({})", timer.elapsed(),event_string);
+                        warn!(target: LOG_TARGET, "Event handling took too long: {:?}", timer.elapsed());
                     }
                  },
                 _ = publish_peer_info_interval.tick() => {

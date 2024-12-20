@@ -11,7 +11,7 @@ use axum::{
 use log::{error, info};
 use serde::Serialize;
 use tari_core::proof_of_work::PowAlgorithm;
-use tari_utilities::{epoch_time::EpochTime, hex::Hex};
+use tari_utilities::{encoding::Base58, epoch_time::EpochTime, hex::Hex};
 use tokio::sync::oneshot;
 
 use super::MAX_ACCEPTABLE_HTTP_TIMEOUT;

@@ -21,18 +21,28 @@
 // OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
 // DAMAGE.
 
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use tari_common_types::types::{BlockHash, FixedHash};
+use tari_core::proof_of_work::{AccumulatedDifficulty, Difficulty};
+use tari_utilities::epoch_time::EpochTime;
 
 use super::lmdb_block_storage::BlockCache;
 use crate::sharechain::{error::ShareChainError, p2block::P2Block};
 
-struct P2BlockHeader {
-    height: u64,
-    hash: FixedHash,
-    prev_hash: FixedHash,
-    uncles: Vec<(u64, FixedHash)>,
+#[derive(Clone)]
+pub(crate) struct P2BlockHeader {
+    pub height: u64,
+    pub hash: FixedHash,
+    pub prev_hash: FixedHash,
+    pub timestamp: EpochTime,
+    pub target_difficulty: Difficulty,
+    pub total_pow: AccumulatedDifficulty,
+    pub verified: bool,
+    pub uncles: Vec<(u64, FixedHash)>,
 }
 /// A collection of blocks with the same height.
 pub struct P2ChainLevel<T: BlockCache> {
@@ -40,7 +50,7 @@ pub struct P2ChainLevel<T: BlockCache> {
     block_cache: Arc<T>,
     height: u64,
     chain_block: RwLock<BlockHash>,
-    block_headers: RwLock<Vec<P2BlockHeader>>,
+    block_headers: RwLock<HashMap<BlockHash, P2BlockHeader>>,
 }
 
 impl<T: BlockCache> P2ChainLevel<T> {
@@ -54,14 +64,21 @@ impl<T: BlockCache> P2ChainLevel<T> {
             hash: block.hash,
             prev_hash: block.prev_hash,
             uncles: block.uncles.clone(),
+            timestamp: block.timestamp,
+            target_difficulty: block.target_difficulty(),
+            total_pow: block.total_pow(),
+            verified: block.verified,
         };
+        let mut block_headers = HashMap::new();
+        block_headers.insert(block.hash, header);
+
         block_cache.insert(block.hash, block);
 
         Self {
             block_cache,
             height,
             chain_block,
-            block_headers: RwLock::new(vec![header]),
+            block_headers: RwLock::new(block_headers),
         }
     }
 
@@ -69,7 +86,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
         let mut res = vec![];
         // TODO: Optimize
         let lock = self.block_headers.read().expect("could not lock");
-        for block in lock.iter() {
+        for block in lock.values() {
             for uncles in &block.uncles {
                 if &uncles.1 == hash {
                     res.push((block.height, block.hash));
@@ -84,12 +101,17 @@ impl<T: BlockCache> P2ChainLevel<T> {
 
     pub fn get_prev_hash(&self, hash: &FixedHash) -> Option<FixedHash> {
         let lock = self.block_headers.read().expect("could not lock");
-        for block in lock.iter() {
-            if &block.hash == hash {
-                return Some(block.prev_hash);
-            }
-        }
-        None
+        lock.get(hash).map(|b| b.prev_hash)
+    }
+
+    pub fn get_uncles(&self, hash: &FixedHash) -> Vec<(u64, FixedHash)> {
+        let lock = self.block_headers.read().expect("could not lock");
+        lock.get(hash).map(|b| b.uncles.clone()).unwrap_or_default()
+    }
+
+    pub fn is_verified(&self, hash: &FixedHash) -> bool {
+        let lock = self.block_headers.read().expect("could not lock");
+        lock.get(hash).map(|b| b.verified).unwrap_or(false)
     }
 
     pub fn height(&self) -> u64 {
@@ -116,8 +138,15 @@ impl<T: BlockCache> P2ChainLevel<T> {
             hash: block.hash,
             prev_hash: block.prev_hash,
             uncles: block.uncles.clone(),
+            timestamp: block.timestamp,
+            target_difficulty: block.target_difficulty(),
+            total_pow: block.total_pow(),
+            verified: block.verified,
         };
-        self.block_headers.write().expect("could not lock").push(header);
+        self.block_headers
+            .write()
+            .expect("could not lock")
+            .insert(block.hash, header);
         self.block_cache.insert(block.hash, block);
         Ok(())
     }
@@ -130,20 +159,20 @@ impl<T: BlockCache> P2ChainLevel<T> {
         self.block_cache.get(hash)
     }
 
+    pub fn get_header(&self, hash: &BlockHash) -> Option<P2BlockHeader> {
+        self.block_headers.read().expect("could not lock").get(hash).cloned()
+    }
+
     pub fn contains(&self, hash: &BlockHash) -> bool {
-        self.block_headers
-            .read()
-            .expect("could not lock")
-            .iter()
-            .any(|b| b.hash == *hash)
+        self.block_headers.read().expect("could not lock").contains_key(hash)
     }
 
     pub fn all_blocks(&self) -> Vec<Arc<P2Block>> {
         self.block_headers
             .read()
             .expect("could not lock")
-            .iter()
-            .filter_map(|header| self.block_cache.get(&header.hash))
+            .keys()
+            .filter_map(|hash| self.block_cache.get(&hash))
             .collect()
     }
 }

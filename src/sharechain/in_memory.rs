@@ -18,7 +18,7 @@ use tari_core::{
         PowAlgorithm,
     },
 };
-use tari_utilities::{epoch_time::EpochTime, hex::Hex};
+use tari_utilities::{encoding::Base58, epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::{
@@ -76,6 +76,7 @@ impl InMemoryShareChain {
 
         Ok(Self {
             p2_chain: Arc::new(RwLock::new(P2Chain::new_empty(
+                pow_algo,
                 config.share_window * 2,
                 config.share_window,
                 config.block_time,

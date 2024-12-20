@@ -59,7 +59,7 @@ use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::PowAlgorithm;
 use tari_shutdown::ShutdownSignal;
-use tari_utilities::{encoding::Base58, epoch_time::EpochTime, hex::Hex};
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::{
     select,
     sync::{

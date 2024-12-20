@@ -18,7 +18,7 @@ use tari_core::{
         PowAlgorithm,
     },
 };
-use tari_utilities::{encoding::Base58, epoch_time::EpochTime, hex::Hex};
+use tari_utilities::{epoch_time::EpochTime, hex::Hex};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::{

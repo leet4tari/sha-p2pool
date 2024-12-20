@@ -30,7 +30,6 @@ use std::{
 
 use itertools::Itertools;
 use log::*;
-use minotari_app_grpc::tari_rpc::PowAlgo;
 use tari_common_types::types::FixedHash;
 use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, AccumulatedDifficulty, PowAlgorithm};
 use tari_utilities::hex::Hex;

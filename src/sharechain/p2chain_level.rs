@@ -172,7 +172,7 @@ impl<T: BlockCache> P2ChainLevel<T> {
             .read()
             .expect("could not lock")
             .keys()
-            .filter_map(|hash| self.block_cache.get(&hash))
+            .filter_map(|hash| self.block_cache.get(hash))
             .collect()
     }
 }

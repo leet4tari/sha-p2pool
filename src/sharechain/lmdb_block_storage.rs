@@ -129,9 +129,6 @@ fn resize_db(env: &Rkv<LmdbEnvironment>) {
 pub trait BlockCache {
     fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>>;
     fn insert(&self, hash: BlockHash, block: Arc<P2Block>);
-    fn contains(&self, hash: &BlockHash) -> bool {
-        self.get(hash).is_some()
-    }
 }
 
 #[cfg(test)]

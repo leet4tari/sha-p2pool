@@ -191,14 +191,13 @@ impl InMemoryShareChain {
             if level.contains(&block.hash) {
                 let block_in_chain = level.get(&block.hash).unwrap();
 
-                info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {}:{}, verified: {}", self.pow_algo, block.height, &block.hash.to_hex()[0..8], block_in_chain.verified);
-
-                return Ok(ChainAddResult::default());
-                // if block_in_chain.verified {
-                //     return Ok(ChainAddResult::default());
-                // }
-                // info!(target: LOG_TARGET, "[{:?}] ❌ Block already added, but not verified: {}:{}, verifying...",
-                // self.pow_algo, block.height, &block.hash.to_hex()[0..8]);
+                // info!(target: LOG_TARGET, "[{:?}] ✅ Block already added: {}:{}, verified: {}", self.pow_algo,
+                // block.height, &block.hash.to_hex()[0..8], block_in_chain.verified);
+                if block_in_chain.verified {
+                    return Ok(ChainAddResult::default());
+                }
+                info!(target: LOG_TARGET, "[{:?}] ❌ Block already added, but not verified: {}:{}, verifying...",
+                self.pow_algo, block.height, &block.hash.to_hex()[0..8]);
             }
         }
 

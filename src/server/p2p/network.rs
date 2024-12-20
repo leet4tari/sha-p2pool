@@ -873,6 +873,8 @@ where S: ShareChain
                 }
                 for mut peer in request.best_peers {
                     if let Some(peer_id) = peer.peer_id {
+                        debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_REQ] New peer info: {:?}  [rx {}, sha {}]received from {}", peer.peer_id, peer.current_random_x_height, peer.current_sha3x_height, peer_id);
+
                         // Reset the timestamp so that we can try to ping them
                         peer.timestamp = EpochTime::now().as_u64();
                         self.add_peer(peer, peer_id).await;
@@ -902,6 +904,7 @@ where S: ShareChain
                     self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                 }
                 for mut peer in response.best_peers {
+                    debug!(target: PEER_INFO_LOGGING_LOG_TARGET, "[DIRECT_PEER_EXCHANGE_RESP] New peer info: {:?}  [rx {}, sha {}]received from {}", peer.peer_id, peer.current_random_x_height, peer.current_sha3x_height, peer_id);
                     if let Some(peer_id) = peer.peer_id {
                         // Reset the timestamp so that we can try to ping them
                         peer.timestamp = EpochTime::now().as_u64();

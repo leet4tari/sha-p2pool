@@ -187,12 +187,12 @@ loggers:
     appenders:
       - new_tip_notify
     additive: false
-  tari::p2pool::server::p2p:
-    level: info
-    appenders:
-      - p2p
-      - stdout
-    additive: false
+  # tari::p2pool::server::p2p:
+  #   level: info
+  #   appenders:
+  #     - p2p
+  #     - stdout
+  #   additive: false
   # For debugging only
   # tari::p2pool::message_logging:
   #   level: debug

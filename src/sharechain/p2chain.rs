@@ -102,13 +102,13 @@ impl ChainAddResult {
 impl Display for ChainAddResult {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         if let Some(tip) = self.new_tip {
-            writeln!(
+            write!(
                 f,
                 "Added new tip {}({:x}{:x}{:x}{:x})",
                 tip.1, tip.0[0], tip.0[1], tip.0[2], tip.0[3]
             )?;
         } else {
-            writeln!(f, "No new tip added")?;
+            write!(f, "No new tip added")?;
         }
         if !self.missing_blocks.is_empty() {
             let mut missing_blocks: Vec<String> = Vec::new();
@@ -118,7 +118,7 @@ impl Display for ChainAddResult {
                     height, hash[0], hash[1], hash[2], hash[3]
                 ));
             }
-            writeln!(f, "Missing blocks: {:?}", missing_blocks)?;
+            write!(f, "Missing blocks: {:?}", missing_blocks)?;
         }
         Ok(())
     }

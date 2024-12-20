@@ -38,6 +38,7 @@ use libp2p::{
     swarm::{
         behaviour::toggle::Toggle,
         dial_opts::{DialOpts, PeerCondition},
+        DialError,
         NetworkBehaviour,
         SwarmEvent,
     },
@@ -1225,11 +1226,19 @@ where S: ShareChain
                 error,
                 ..
             } => {
-                warn!(target: LOG_TARGET, squad = &self.config.squad; "Outgoing connection error: {peer_id:?} -> {error:?}");
-                self.network_peer_store
-                    .write()
-                    .await
-                    .move_to_grey_list(peer_id, format!("Outgoing connection error: {error}"));
+                match error {
+                    DialError::Transport(transport_error) => {
+                        // There are a lot of cancelled errors, so ignore them
+                        debug!(target: LOG_TARGET, "Outgoing connection error, ignoring: {peer_id:?} -> {transport_error:?}");
+                    },
+                    _ => {
+                        warn!(target: LOG_TARGET, squad = &self.config.squad; "Outgoing connection error: {peer_id:?} -> {error:?}");
+                        self.network_peer_store
+                            .write()
+                            .await
+                            .move_to_grey_list(peer_id, format!("Outgoing connection error: {error}"));
+                    },
+                };
             },
             SwarmEvent::Behaviour(event) => match event {
                 ServerNetworkBehaviourEvent::Mdns(mdns_event) => match mdns_event {
@@ -1958,14 +1967,15 @@ where S: ShareChain
             let mut addresses = relay.addresses.clone();
             addresses.truncate(8);
 
+            // Try dial, this should already be happening though
             if let Err(err) = self.swarm.dial(
                 DialOpts::peer_id(relay.peer_id)
                     .addresses(relay.addresses.clone())
-                    .condition(PeerCondition::NotDialing)
+                    // .condition(PeerCondition::NotDialing)
                     .build(),
             ) {
-                warn!(target: LOG_TARGET, "🚨 Failed to dial relay: {}", err);
-                return;
+                debug!(target: LOG_TARGET, "🚨 Failed to dial relay: {}", err);
+                // return;
             }
 
             addresses.iter().for_each(|addr| {
@@ -2147,7 +2157,10 @@ where S: ShareChain
     /// Main loop of the service that drives the events and libp2p swarm forward.
     #[allow(clippy::too_many_lines)]
     async fn main_loop(&mut self) -> Result<(), Error> {
-        let mut publish_peer_info_interval = tokio::time::interval(self.config.peer_info_publish_interval);
+        let mut publish_peer_info_interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + self.config.peer_info_publish_interval,
+            self.config.peer_info_publish_interval,
+        );
         publish_peer_info_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut grey_list_clear_interval = tokio::time::interval(self.config.grey_list_clear_interval);
@@ -2276,7 +2289,7 @@ where S: ShareChain
                  },
                 _ = publish_peer_info_interval.tick() => {
                     let timer = Instant::now();
-                    info!(target: LOG_TARGET, "pub peer info");
+                    info!(target: LOG_TARGET, "Publishing peer info");
 
                     // broadcast peer info
                     if let Err(error) = self.broadcast_peer_info().await {

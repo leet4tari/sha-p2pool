@@ -30,6 +30,7 @@ pub(crate) struct PeerStoreRecord {
     pub last_grey_list_reason: Option<String>,
     pub catch_up_attempts: u64,
     pub last_ping: Option<EpochTime>,
+    pub last_dial_attempt: Option<Instant>,
 }
 
 impl PeerStoreRecord {
@@ -44,6 +45,7 @@ impl PeerStoreRecord {
             last_grey_list_reason: None,
             catch_up_attempts: 0,
             last_ping: None,
+            last_dial_attempt: None,
         }
     }
 
@@ -221,6 +223,30 @@ impl PeerStore {
         peers.retain(|peer| !other_nodes_peers.contains(&peer.peer_id));
         peers.truncate(count);
         peers.into_iter().cloned().collect()
+    }
+
+    pub fn best_peers_to_dial(&self, count: usize) -> Vec<PeerStoreRecord> {
+        let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
+        peers.retain(|peer| {
+            !peer.peer_info.public_addresses().is_empty() &&
+                (peer.last_dial_attempt.is_none() || peer.last_dial_attempt.unwrap().elapsed().as_secs() > 60)
+        });
+        peers.sort_by(|a, b| {
+            b.num_grey_listings
+                .cmp(&a.num_grey_listings)
+                .then(b.peer_info.current_random_x_pow.cmp(&a.peer_info.current_random_x_pow))
+                .then(b.peer_info.current_sha3x_pow.cmp(&a.peer_info.current_sha3x_pow))
+        });
+        peers.truncate(count);
+        peers.into_iter().cloned().collect()
+    }
+
+    pub fn update_last_dial_attempt(&mut self, peer_id: &PeerId) {
+        if let Some(entry) = self.whitelist_peers.get_mut(&peer_id.to_base58()) {
+            let mut new_record = entry.clone();
+            new_record.last_dial_attempt = Some(Instant::now());
+            *entry = new_record;
+        }
     }
 
     pub fn reset_last_sync_attempt(&mut self, peer_id: &PeerId) {

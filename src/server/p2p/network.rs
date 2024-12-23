@@ -2236,22 +2236,26 @@ where S: ShareChain
                                     warn!(target: LOG_TARGET, "Failed to dial seed peers: {e:?}");
                                 },
                             }
-                            continue;
+                            // continue;
                          }
 
                         let mut num_dialed = 0;
-                        let store_read_lock = self.network_peer_store.read().await;
+                        let mut store_write_lock = self.network_peer_store.write().await;
                         // Rather try and search good peers rather than randomly dialing
                         // 1000 peers will take a long time to get through
-                        for record in store_read_lock.whitelist_peers().values() {
+                        for record in store_write_lock.best_peers_to_dial(100) {
+                            debug!(target: LOG_TARGET, "Dialing peer: {:?} with height(rx/sha) {}/{}", record.peer_id, record.peer_info.current_random_x_height, record.peer_info.current_sha3x_height);
+                            // dbg!(&record.peer_id);
                             // Only dial seed peers if we have 0 connections
                             if !self.swarm.is_connected(&record.peer_id)
-                             &&  !store_read_lock.is_seed_peer(&record.peer_id)  {
-                                let _unused = self.swarm.dial(record.peer_id);
+                             &&  !store_write_lock.is_seed_peer(&record.peer_id)  {
+                                store_write_lock.update_last_dial_attempt(&record.peer_id);
+                                let dial_opts=  DialOpts::peer_id(record.peer_id).condition(PeerCondition::Always).addresses(record.peer_info.public_addresses().clone()).extend_addresses_through_behaviour().build();
+                                let _unused = self.swarm.dial(dial_opts);
                                 num_dialed += 1;
                                 // We can only do 30 connections
                                 // after 30 it starts cancelling dials
-                                if num_dialed > 30 {
+                                if num_dialed > 5 {
                                     break;
                                 }
                             }

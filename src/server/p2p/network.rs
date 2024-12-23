@@ -350,6 +350,7 @@ where S: ShareChain
         stats_broadcast_client: StatsBroadcastClient,
     ) -> Result<Self, Error> {
         let swarm = setup::new_swarm(config).await?;
+        info!(target: LOG_TARGET, "Swarm created. Our id: {}", swarm.local_peer_id());
 
         // client related channels
         let (broadcast_block_tx, broadcast_block_rx) = broadcast::channel::<NotifyNewTipBlock>(100);
@@ -846,21 +847,15 @@ where S: ShareChain
                 .await
                 .best_peers_to_share(num_peers, &request.known_peer_ids);
             let my_best_peers: Vec<_> = my_best_peers.into_iter().map(|p| p.peer_info).collect();
-            if self
-                .swarm
-                .behaviour_mut()
-                .direct_peer_exchange
-                .send_response(
-                    channel,
-                    Ok(DirectPeerInfoResponse {
-                        peer_id: local_peer_id.to_base58(),
-                        info,
-                        best_peers: my_best_peers,
-                    }),
-                )
-                .is_err()
-            {
-                error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send peer info response");
+            if let Err(e) = self.swarm.behaviour_mut().direct_peer_exchange.send_response(
+                channel,
+                Ok(DirectPeerInfoResponse {
+                    peer_id: local_peer_id.to_base58(),
+                    info,
+                    best_peers: my_best_peers,
+                }),
+            ) {
+                error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to send peer info response to {:?}: {:?}", source_peer, e);
             }
         } else {
             error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to create peer info");
@@ -2255,7 +2250,7 @@ where S: ShareChain
                                 num_dialed += 1;
                                 // We can only do 30 connections
                                 // after 30 it starts cancelling dials
-                                if num_dialed > 5 {
+                                if num_dialed > 80 {
                                     break;
                                 }
                             }

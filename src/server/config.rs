@@ -23,6 +23,7 @@ pub struct Config {
     pub max_relay_circuits_per_peer: Option<usize>,
     pub block_time: u64,
     pub share_window: u64,
+    pub block_cache_file: PathBuf,
 }
 
 impl Default for Config {
@@ -41,6 +42,7 @@ impl Default for Config {
             max_relay_circuits_per_peer: None,
             block_time: 20,
             share_window: 2160,
+            block_cache_file: PathBuf::from("block_cache"),
         }
     }
 }
@@ -193,6 +195,11 @@ impl ConfigBuilder {
 
     pub fn with_share_window(&mut self, config: u64) -> &mut Self {
         self.config.share_window = config;
+        self
+    }
+
+    pub fn with_block_cache_file(&mut self, config: PathBuf) -> &mut Self {
+        self.config.block_cache_file = config;
         self
     }
 

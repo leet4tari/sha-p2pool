@@ -137,6 +137,39 @@ pub struct P2Chain<T: BlockCache> {
 }
 
 impl<T: BlockCache> P2Chain<T> {
+    pub fn new_empty(algo: PowAlgorithm, total_size: u64, share_window: u64, block_time: u64, block_cache: T) -> Self {
+        let levels = HashMap::new();
+        let lwma =
+            LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, block_time).expect("Failed to create LWMA");
+        Self {
+            algo,
+            block_cache: Arc::new(block_cache),
+            block_time,
+            cached_shares: None,
+            levels,
+            total_size,
+            share_window,
+            current_tip: 0,
+            lwma,
+        }
+    }
+
+    pub fn try_load(
+        algo: PowAlgorithm,
+        total_size: u64,
+        share_window: u64,
+        block_time: u64,
+        from_block_cache: T,
+        new_block_cache: T,
+    ) -> Result<Self, ShareChainError> {
+        let mut new_chain = Self::new_empty(algo, total_size, share_window, block_time, new_block_cache);
+        for block in from_block_cache.all_blocks()? {
+            info!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3]);
+            new_chain.add_block_to_chain(block)?;
+        }
+        Ok(new_chain)
+    }
+
     pub fn total_accumulated_tip_difficulty(&self) -> AccumulatedDifficulty {
         match self.get_tip() {
             Some(tip) => tip
@@ -178,23 +211,6 @@ impl<T: BlockCache> P2Chain<T> {
     fn get_chain_block_at_height(&self, height: u64) -> Option<Arc<P2Block>> {
         let level = self.level_at_height(height)?;
         level.get(&level.chain_block())
-    }
-
-    pub fn new_empty(algo: PowAlgorithm, total_size: u64, share_window: u64, block_time: u64, block_cache: T) -> Self {
-        let levels = HashMap::new();
-        let lwma =
-            LinearWeightedMovingAverage::new(DIFFICULTY_ADJUSTMENT_WINDOW, block_time).expect("Failed to create LWMA");
-        Self {
-            algo,
-            block_cache: Arc::new(block_cache),
-            block_time,
-            cached_shares: None,
-            levels,
-            total_size,
-            share_window,
-            current_tip: 0,
-            lwma,
-        }
     }
 
     fn cleanup_chain(&mut self) -> Result<(), ShareChainError> {

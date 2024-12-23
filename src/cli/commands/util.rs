@@ -118,6 +118,7 @@ pub async fn server(
     }
     config_builder.with_base_node_address(args.base_node_address.clone());
 
+    config_builder.with_block_cache_file(env::current_dir()?.join("block_cache"));
     let config = config_builder.build();
     let randomx_factory = RandomXFactory::new(1);
     let consensus_manager = ConsensusManager::builder(Network::get_current_or_user_setting_or_default()).build()?;

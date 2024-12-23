@@ -23,9 +23,12 @@
 
 use std::{
     fs,
+    path::Path,
     sync::{Arc, RwLock},
 };
 
+use anyhow::{anyhow, Error};
+use log::info;
 use rkv::{
     backend::{BackendInfo, Lmdb, LmdbEnvironment},
     Manager,
@@ -35,20 +38,34 @@ use rkv::{
 };
 use tari_common_types::types::BlockHash;
 use tari_utilities::ByteArray;
-use tempfile::Builder;
 
 use super::P2Block;
 use crate::server::p2p::messages::{deserialize_message, serialize_message};
 
+const LOG_TARGET: &str = "tari::p2pool::sharechain::lmdb_block_storage";
 pub(crate) struct LmdbBlockStorage {
     file_handle: Arc<RwLock<Rkv<LmdbEnvironment>>>,
 }
 
 impl LmdbBlockStorage {
+    #[cfg(test)]
     pub fn new_from_temp_dir() -> Self {
+        use tempfile::Builder;
         let root = Builder::new().prefix("p2pool").tempdir().unwrap();
         fs::create_dir_all(root.path()).unwrap();
         let path = root.path();
+        let mut manager = Manager::<LmdbEnvironment>::singleton().write().unwrap();
+        let file_handle = manager.get_or_create(path, Rkv::new::<Lmdb>).unwrap();
+
+        Self { file_handle }
+    }
+
+    pub fn new_from_path(path: &Path) -> Self {
+        info!(target: LOG_TARGET, "Using block storage at {:?}", path);
+        if !fs::exists(path).expect("could not get file") {
+            fs::create_dir_all(path).unwrap();
+            // fs::File::create(path).unwrap();
+        }
         let mut manager = Manager::<LmdbEnvironment>::singleton().write().unwrap();
         let file_handle = manager.get_or_create(path, Rkv::new::<Lmdb>).unwrap();
 
@@ -117,6 +134,27 @@ impl BlockCache for LmdbBlockStorage {
             }
         }
     }
+
+    fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error> {
+        let env = self.file_handle.read().expect("reader");
+        let store = env.open_single("block_cache", StoreOptions::create()).unwrap();
+        let reader = env.read().expect("reader");
+        let mut res = vec![];
+        let iter = store.iter_start(&reader)?;
+        for r in iter {
+            let (_k, v) = r?;
+            match v {
+                rkv::Value::Blob(b) => {
+                    let block = Arc::new(deserialize_message(b).unwrap());
+                    res.push(block);
+                },
+                _ => {
+                    return Err(anyhow!("Invalid block in storage"));
+                },
+            }
+        }
+        Ok(res)
+    }
 }
 
 fn resize_db(env: &Rkv<LmdbEnvironment>) {
@@ -129,6 +167,7 @@ fn resize_db(env: &Rkv<LmdbEnvironment>) {
 pub trait BlockCache {
     fn get(&self, hash: &BlockHash) -> Option<Arc<P2Block>>;
     fn insert(&self, hash: BlockHash, block: Arc<P2Block>);
+    fn all_blocks(&self) -> Result<Vec<Arc<P2Block>>, Error>;
 }
 
 #[cfg(test)]
@@ -156,6 +195,10 @@ pub mod test {
 
         fn insert(&self, hash: BlockHash, block: Arc<P2Block>) {
             self.blocks.write().unwrap().insert(hash, block);
+        }
+
+        fn all_blocks(&self) -> Vec<Arc<P2Block>> {
+            self.blocks.read().unwrap().values().cloned().collect()
         }
     }
 

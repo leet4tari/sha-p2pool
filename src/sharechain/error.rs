@@ -45,6 +45,8 @@ pub enum ShareChainError {
     UncleParentNotInMainChain,
     #[error("Block does not have correct total work accumulated")]
     BlockTotalWorkMismatch,
+    #[error("Other: {0}")]
+    Anyhow(#[from] anyhow::Error),
 }
 
 #[derive(Error, Debug)]

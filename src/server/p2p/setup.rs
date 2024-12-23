@@ -151,14 +151,14 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
                         StreamProtocol::new(SHARE_CHAIN_SYNC_REQ_RESP_PROTOCOL),
                         request_response::ProtocolSupport::Full,
                     )],
-                    request_response::Config::default().with_request_timeout(Duration::from_secs(10)), // 10 is the default
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(30)), // 10 is the default
                 ),
                 direct_peer_exchange: cbor::Behaviour::<DirectPeerInfoRequest, Result<DirectPeerInfoResponse, String>>::new(
                     [(
                         StreamProtocol::new(DIRECT_PEER_EXCHANGE_REQ_RESP_PROTOCOL),
                         request_response::ProtocolSupport::Full,
                     )],
-                    request_response::Config::default().with_request_timeout(Duration::from_secs(10)), // 10 is the default
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(60)), // 10 is the default
                 ),
                 catch_up_sync: cbor::Behaviour::<CatchUpSyncRequest, Result<CatchUpSyncResponse, String>>::new(
                     [(
@@ -180,7 +180,7 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
                 dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
                 autonat: autonat::Behaviour::new(key_pair.public().to_peer_id(), Default::default()),
                 connection_limits: connection_limits::Behaviour::new(ConnectionLimits::default().with_max_established_incoming(config.max_incoming_connections).with_max_established_outgoing(config.max_outgoing_connections)),
-                ping: ping::Behaviour::new(ping::Config::default())
+                ping: ping::Behaviour::new(ping::Config::default().with_timeout(Duration::from_secs(30))),
             })
         })
         ?

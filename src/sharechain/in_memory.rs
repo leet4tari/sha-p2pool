@@ -1,8 +1,9 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, collections::HashMap, str::FromStr, sync::Arc};
+use std::{cmp, collections::HashMap, fs, str::FromStr, sync::Arc};
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::NewBlockCoinbase;
@@ -74,14 +75,64 @@ impl InMemoryShareChain {
             return Err(ShareChainError::MissingBlockValidationParams);
         }
 
-        Ok(Self {
-            p2_chain: Arc::new(RwLock::new(P2Chain::new_empty(
+        let data_path = config.block_cache_file.join(pow_algo.to_string());
+
+        let mut p2chain = None;
+        if fs::exists(&data_path).map_err(|e| anyhow!("block cache file errored when checking exists: {}", e))? {
+            let bkp_file = config
+                .block_cache_file
+                .as_path()
+                .parent()
+                .ok_or_else(|| anyhow!("Block cache file has no parent"))?
+                .join("block_cache_backup")
+                .join(pow_algo.to_string());
+            info!(target: LOG_TARGET, "Found old block cache file, renaming from {:?} to {:?}", data_path.as_path(), &bkp_file);
+
+            // First remove the old backup file
+            let _ = fs::remove_dir_all(bkp_file.as_path())
+                .inspect_err(|e| error!(target: LOG_TARGET, "Could not remove old block cache file:{:?}", e));
+            fs::create_dir_all(bkp_file.parent().unwrap())
+                .map_err(|e| anyhow::anyhow!("Could not create block cache backup directory:{:?}", e))?;
+            fs::rename(data_path.as_path(), bkp_file.as_path())
+                .map_err(|e| anyhow::anyhow!("Could not rename file to old file:{:?}", e))?;
+            let old = LmdbBlockStorage::new_from_path(bkp_file.as_path());
+            let new = LmdbBlockStorage::new_from_path(&data_path);
+            match P2Chain::try_load(
                 pow_algo,
                 config.share_window * 2,
                 config.share_window,
                 config.block_time,
-                LmdbBlockStorage::new_from_temp_dir(),
-            ))),
+                old,
+                new,
+            ) {
+                Ok(p) => {
+                    let _unused =
+                        stat_client.send_chain_changed(pow_algo, p.get_height(), p.get_max_chain_length() as u64);
+
+                    p2chain = Some(p);
+                },
+                Err(e) => error!(target: LOG_TARGET, "Could not load chain from file: {}", e),
+            };
+
+            // fs::remove_dir_all(bkp_file.as_path())
+            //     .map_err(|e| anyhow::anyhow!("Could not remove old block cache file:{:?}", e))?;
+        }
+
+        if p2chain.is_none() {
+            let block_cache = LmdbBlockStorage::new_from_path(&data_path);
+            p2chain = Some(P2Chain::new_empty(
+                pow_algo,
+                config.share_window * 2,
+                config.share_window,
+                config.block_time,
+                block_cache,
+            ));
+        }
+
+        let p2chain = p2chain.unwrap();
+
+        Ok(Self {
+            p2_chain: Arc::new(RwLock::new(p2chain)),
             pow_algo,
             block_validation_params,
             consensus_manager,

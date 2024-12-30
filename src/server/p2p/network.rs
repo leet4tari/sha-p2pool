@@ -775,7 +775,6 @@ where S: ShareChain
                 error!(target: LOG_TARGET, squad = &self.config.squad; "Failed to create peer info: {error:?}");
             })
         {
-            dbg!("here");
             let local_peer_id = *self.swarm.local_peer_id();
             if peer == &local_peer_id {
                 return;

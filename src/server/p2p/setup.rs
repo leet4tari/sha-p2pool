@@ -178,7 +178,7 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
                 relay_client,
                 dcutr: dcutr::Behaviour::new(key_pair.public().to_peer_id()),
                 autonat: autonat::Behaviour::new(key_pair.public().to_peer_id(), Default::default()),
-                connection_limits: connection_limits::Behaviour::new(ConnectionLimits::default().with_max_established_incoming(config.max_incoming_connections).with_max_established_outgoing(config.max_outgoing_connections)),
+                // connection_limits: connection_limits::Behaviour::new(ConnectionLimits::default().with_max_established_incoming(config.max_incoming_connections).with_max_established_outgoing(config.max_outgoing_connections)),
                 ping: ping::Behaviour::new(ping::Config::default().with_timeout(Duration::from_secs(30))),
             })
         })

@@ -217,7 +217,7 @@ struct PerformCatchUpSync {
 pub struct ServerNetworkBehaviour {
     // This must be the first behaviour otherwise you end up with a debug-assert failing in
     // req-resp
-    pub connection_limits: connection_limits::Behaviour,
+    // pub connection_limits: connection_limits::Behaviour,
     pub mdns: Toggle<mdns::Behaviour<Tokio>>,
     pub gossipsub: gossipsub::Behaviour,
     pub share_chain_sync: cbor::Behaviour<SyncMissingBlocksRequest, Result<SyncMissingBlocksResponse, String>>,
@@ -1193,10 +1193,10 @@ where S: ShareChain
                 num_established,
                 cause,
             } => {
-                // Ignore dials where we can't get hold of the person
-                if !endpoint.is_dialer() {
-                    warn!(target: LOG_TARGET, squad = &self.config.squad; "Connection closed: {peer_id:?} -> {endpoint:?} ({num_established:?}) -> {cause:?}");
-                }
+                // // Ignore dials where we can't get hold of the person
+                // if !endpoint.is_dialer() {
+                //     warn!(target: LOG_TARGET, squad = &self.config.squad; "Connection closed: {peer_id:?} ->
+                // {endpoint:?} ({num_established:?}) -> {cause:?}"); }
                 warn!(target: LOG_TARGET, squad = &self.config.squad; "Connection closed: {peer_id:?} -> {endpoint:?} ({num_established:?}) -> {cause:?}");
             },
             SwarmEvent::IncomingConnectionError {

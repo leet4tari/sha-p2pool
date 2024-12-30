@@ -165,7 +165,9 @@ impl<T: BlockCache> P2Chain<T> {
         let mut new_chain = Self::new_empty(algo, total_size, share_window, block_time, new_block_cache);
         for block in from_block_cache.all_blocks()? {
             info!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3]);
-            new_chain.add_block_to_chain(block)?;
+            let _ = new_chain.add_block_to_chain(block).inspect_err(|e| {
+                error!(target: LOG_TARGET, "Failed to load block into chain: {}", e);
+            });
         }
         Ok(new_chain)
     }
@@ -466,12 +468,13 @@ impl<T: BlockCache> P2Chain<T> {
                         let nextblock = parent_level.get_header(&current_block.prev_hash);
                         if nextblock.is_none() {
                             error!(target: LOG_TARGET, "FATAL: Reorging (block in chain) failed because parent block was not found and chain data is corrupted.");
-                            panic!(
-                                "FATAL: Reorging (block in chain) failed because parent block was not found and chain \
-                                 data is corrupted. current_block: {:?}, current tip: {:?}",
-                                current_block.height,
-                                self.get_tip().map(|t| t.height())
-                            );
+                            return Err(ShareChainError::BlockNotFound);
+                            // panic!(
+                            //     "FATAL: Reorging (block in chain) failed because parent block was not found and chain
+                            // \      data is corrupted. current_block: {:?}, current tip:
+                            // {:?}",     current_block.height,
+                            //     self.get_tip().map(|t| t.height())
+                            // );
                         }
                         // fix the main chain
                         let mut_parent_level = self.level_at_height(current_block.height.saturating_sub(1)).unwrap();

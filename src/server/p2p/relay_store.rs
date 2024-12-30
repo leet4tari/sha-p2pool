@@ -22,11 +22,11 @@ impl RelayStore {
     }
 
     pub fn select_random_relay(&mut self) {
-        let Some((peer, addrs)) = self.possible_relays.iter().choose(&mut rand::thread_rng()) else {
+        let Some((_peer, addrs)) = self.possible_relays.iter().choose(&mut rand::thread_rng()) else {
             return;
         };
         self.selected_relay = Some(RelayPeer {
-            peer_id: *peer,
+            // peer_id: *peer,
             addresses: addrs.iter().cloned().collect(),
             is_circuit_established: false,
         });
@@ -35,7 +35,7 @@ impl RelayStore {
 
 #[derive(Debug, Clone)]
 pub struct RelayPeer {
-    pub peer_id: PeerId,
+    // pub peer_id: PeerId,
     pub addresses: Vec<Multiaddr>,
     pub is_circuit_established: bool,
 }

@@ -81,8 +81,7 @@ pub(crate) async fn new_swarm(config: &config::Config) -> Result<Swarm<ServerNet
     let swarm = libp2p::SwarmBuilder::with_existing_identity(keypair(&config.p2p_service).await?)
         .with_tokio()
        .with_tcp(tcp::Config::default().nodelay(true), // Nodelay helps with hole punching
-         noise::Config::new, yamux::Config::default)
-        ?
+         noise::Config::new, yamux::Config::default)?
         .with_quic_config(|mut config| {
             config.handshake_timeout = Duration::from_secs(30);
             config

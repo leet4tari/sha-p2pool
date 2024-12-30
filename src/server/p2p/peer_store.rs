@@ -229,7 +229,7 @@ impl PeerStore {
         let mut peers = self.whitelist_peers.values().collect::<Vec<_>>();
         peers.retain(|peer| {
             !peer.peer_info.public_addresses().is_empty() &&
-                (peer.last_dial_attempt.is_none() || peer.last_dial_attempt.unwrap().elapsed().as_secs() > 60)
+                (peer.last_dial_attempt.is_none() || peer.last_dial_attempt.unwrap().elapsed().as_secs() > 120)
         });
         peers.sort_by(|a, b| {
             b.num_grey_listings

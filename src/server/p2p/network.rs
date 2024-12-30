@@ -1626,6 +1626,11 @@ where S: ShareChain
         let mut blocks: Vec<_> = response.into_blocks().into_iter().map(Arc::new).collect();
         if blocks.is_empty() {
             warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} sent 0 blocks for catch up sync", peer);
+            let _res = self.swarm.disconnect_peer_id(peer);
+            self.network_peer_store
+                .write()
+                .await
+                .move_to_blacklist(&peer, "Peer sent 0 blocks for catch up sync".to_string());
             return;
         }
         info!(target: SYNC_REQUEST_LOG_TARGET, "Received catch up sync response for chain {} from {} with blocks {}. Their tip: {}:{}", algo,  peer, blocks.iter().map(|a| a.height.to_string()).join(", "), their_height, &their_tip_hash.to_hex()[0..8]);

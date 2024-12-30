@@ -426,6 +426,26 @@ impl PeerStore {
         }
     }
 
+    pub fn move_to_blacklist(&mut self, peer: &PeerId, reason: String) {
+        let mut record = None;
+        if self.whitelist_peers.contains_key(&peer.to_base58()) {
+            record = self.whitelist_peers.remove(&peer.to_base58());
+        }
+        if self.greylist_peers.contains_key(&peer.to_base58()) {
+            record = self.greylist_peers.remove(&peer.to_base58());
+        }
+
+        if let Some(record) = record {
+            warn!(target: LOG_TARGET, "Blacklisting peer {} because of: {}", peer, reason);
+            self.blacklist_peers.insert(peer.to_base58(), record);
+            let _unused = self.stats_broadcast_client.send_new_peer(
+                self.whitelist_peers.len() as u64,
+                self.greylist_peers.len() as u64,
+                self.blacklist_peers.len() as u64,
+            );
+        }
+    }
+
     // pub fn is_blacklisted(&self, peer_id: &PeerId) -> bool {
     //     self.blacklist_peers.contains_key(&peer_id.to_base58())
     // }

@@ -743,9 +743,7 @@ where S: ShareChain
             return false;
         }
 
-        for addr in &payload.public_addresses() {
-            self.swarm.add_peer_address(peer, addr.clone());
-        }
+        let public_addresses = payload.public_addresses();
         let add_status = self.network_peer_store.write().await.add(peer, payload).await;
 
         match add_status {
@@ -753,6 +751,10 @@ where S: ShareChain
                 // self.initiate_direct_peer_exchange(&peer).await;
                 // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                 // let _unused = self.swarm.dial(peer);
+                for addr in &public_addresses {
+                    self.swarm.add_peer_address(peer, addr.clone());
+                }
+
                 return true;
             },
             AddPeerStatus::Existing => {},
@@ -760,7 +762,7 @@ where S: ShareChain
                 debug!(target: LOG_TARGET, "Added peer but it was grey listed");
             },
             AddPeerStatus::Blacklisted => {
-                info!(target: LOG_TARGET, "Added peer but it was black listed");
+                debug!(target: LOG_TARGET, "Added peer {} but it was black listed", peer);
             },
         }
 
@@ -2134,12 +2136,12 @@ where S: ShareChain
                         }
                     },
                     Err(error) => {
-                        error!(target: SYNC_REQUEST_LOG_TARGET, "Failed to add Catchup synced blocks to share
-                chain: {error:?}");
-                        // network_peer_store
-                        //     .write()
-                        //     .await
-                        //     .move_to_grey_list(peer, format!("Block failed validation: {error}"));
+                        error!(target: SYNC_REQUEST_LOG_TARGET, "Failed to add Catchup synced blocks from {source_peer:?} to share chain: {error:?}");
+                        let _unused = self.swarm.disconnect_peer_id(source_peer);
+                        self.network_peer_store
+                            .write()
+                            .await
+                            .move_to_blacklist(&source_peer, format!("Block failed validation: {error}"));
                     },
                 }
                 // info!(target: LOG_TARGET, "[{:?}] Blocks via catchup sync added {:?}", algo, blocks_added);

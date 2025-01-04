@@ -49,6 +49,7 @@ use log::{
     warn,
 };
 use lru::LruCache;
+use rand::{seq::SliceRandom, thread_rng};
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
@@ -116,6 +117,7 @@ const MAX_CATCH_UP_BLOCKS_TO_RETURN: usize = 10;
 // Time to start up and catch up before we start processing new tip messages
 const NUM_PEERS_TO_SYNC_PER_ALGO: usize = 32;
 const NUM_PEERS_INITIAL_SYNC: usize = 100;
+const NUM_PEERS_TO_HEIGHT_EXCHANGE: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct Squad {
@@ -1176,6 +1178,13 @@ where S: ShareChain
                 established_in,
                 ..
             } => {
+                {
+                    if self.network_peer_store.read().await.is_blacklisted(&peer_id) {
+                        warn!(target: LOG_TARGET, squad = &self.config.squad; "Connection established with blacklisted peer: {peer_id:?} -> {endpoint:?} ({num_established:?}/{concurrent_dial_errors:?}/{established_in:?})");
+                        let _ = self.swarm.disconnect_peer_id(peer_id);
+                        return;
+                    }
+                }
                 // if num_established == NonZeroU32::new(1).expect("Can't fail") {
                 self.initiate_direct_peer_exchange(&peer_id).await;
                 // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
@@ -1785,6 +1794,14 @@ where S: ShareChain
             mut permit,
         } = perform_catch_up_sync;
 
+        // Check if we have blacklisted them.
+        {
+            if self.network_peer_store.read().await.is_blacklisted(&peer) {
+                warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} is blacklisted, not syncing", peer);
+                return Ok(());
+            }
+        }
+
         // First check if we have a sync in progress for this peer.
 
         let (share_chain, semaphore, in_progress_syncs, last_progress) = match algo {
@@ -2101,6 +2118,13 @@ where S: ShareChain
                 block,
                 source_peer,
             } => {
+                // First check if the peer is blacklisted
+                {
+                    if self.network_peer_store.read().await.is_blacklisted(&source_peer) {
+                        warn!(target: SYNC_REQUEST_LOG_TARGET, "Peer {} is blacklisted, not syncing", source_peer);
+                        return;
+                    }
+                }
                 let (share_chain, synced_bool) = match algo {
                     PowAlgorithm::RandomX => (
                         self.share_chain_random_x.clone(),
@@ -2328,9 +2352,12 @@ where S: ShareChain
                 _ = chain_height_exchange_interval.tick() =>  {
                     let timer = Instant::now();
                     if !self.config.is_seed_peer && self.config.sync_job_enabled {
-                        for peer in self.swarm.connected_peers().copied().collect::<Vec::<_>>() {
+                        let mut connected_peers = self.swarm.connected_peers().copied().collect::<Vec::<_>>();
+                        let mut rng = thread_rng();
+                        connected_peers.shuffle(&mut rng);
+                        for peer in connected_peers.iter().take(NUM_PEERS_TO_HEIGHT_EXCHANGE) {
                             // Update their latest tip.
-                            self.initiate_direct_peer_exchange(&peer).await;
+                            self.initiate_direct_peer_exchange(peer).await;
 
 
                             // let _ = self.perform_catch_up_sync(PerformCatchUpSync {

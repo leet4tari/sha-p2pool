@@ -446,9 +446,9 @@ impl PeerStore {
         }
     }
 
-    // pub fn is_blacklisted(&self, peer_id: &PeerId) -> bool {
-    //     self.blacklist_peers.contains_key(&peer_id.to_base58())
-    // }
+    pub fn is_blacklisted(&self, peer_id: &PeerId) -> bool {
+        self.blacklist_peers.contains_key(&peer_id.to_base58())
+    }
 
     // pub fn is_whitelisted(&self, peer_id: &PeerId) -> bool {
     //     if self.whitelist_peers.contains_key(&peer_id.to_base58()) {

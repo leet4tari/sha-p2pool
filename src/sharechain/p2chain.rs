@@ -35,12 +35,15 @@ use tari_core::proof_of_work::{lwma_diff::LinearWeightedMovingAverage, Accumulat
 use tari_utilities::hex::Hex;
 
 use super::{lmdb_block_storage::BlockCache, p2chain_level::P2BlockHeader};
-use crate::sharechain::{
-    error::ShareChainError,
-    in_memory::MAX_UNCLE_AGE,
-    p2block::P2Block,
-    p2chain_level::P2ChainLevel,
-    DIFFICULTY_ADJUSTMENT_WINDOW,
+use crate::{
+    server::PROTOCOL_VERSION,
+    sharechain::{
+        error::ShareChainError,
+        in_memory::MAX_UNCLE_AGE,
+        p2block::P2Block,
+        p2chain_level::P2ChainLevel,
+        DIFFICULTY_ADJUSTMENT_WINDOW,
+    },
 };
 
 const LOG_TARGET: &str = "tari::p2pool::sharechain::chain";
@@ -164,6 +167,10 @@ impl<T: BlockCache> P2Chain<T> {
     ) -> Result<Self, ShareChainError> {
         let mut new_chain = Self::new_empty(algo, total_size, share_window, block_time, new_block_cache);
         for block in from_block_cache.all_blocks()? {
+            if block.version != PROTOCOL_VERSION {
+                warn!(target: LOG_TARGET, "Block version mismatch, skipping block");
+                continue;
+            }
             info!(target: LOG_TARGET, "Loading block {}({:x}{:x}{:x}{:x}) into chain", block.height, block.hash[0], block.hash[1], block.hash[2], block.hash[3]);
             let _ = new_chain.add_block_to_chain(block).inspect_err(|e| {
                 error!(target: LOG_TARGET, "Failed to load block into chain: {}", e);

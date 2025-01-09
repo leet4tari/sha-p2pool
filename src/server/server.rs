@@ -21,7 +21,6 @@ use crate::{
         grpc::{base_node::TariBaseNodeGrpc, p2pool::ShaP2PoolGrpc},
         http::server::HttpServer,
         p2p,
-        p2p::peer_store::PeerStore,
     },
     sharechain::ShareChain,
 };
@@ -56,7 +55,6 @@ where S: ShareChain
     ) -> Result<Self, Error> {
         let share_chain_sha3x = Arc::new(share_chain_sha3x);
         let share_chain_random_x = Arc::new(share_chain_random_x);
-        let network_peer_store = PeerStore::new(stats_broadcast_client.clone());
         let are_we_synced_with_randomx_p2pool = Arc::new(AtomicBool::new(false));
         let are_we_synced_with_sha3x_p2pool = Arc::new(AtomicBool::new(false));
         let stats_client = stats_collector.create_client();
@@ -65,7 +63,6 @@ where S: ShareChain
             &config,
             share_chain_sha3x.clone(),
             share_chain_random_x.clone(),
-            network_peer_store,
             shutdown_signal.clone(),
             are_we_synced_with_randomx_p2pool.clone(),
             are_we_synced_with_sha3x_p2pool.clone(),
@@ -95,9 +92,9 @@ where S: ShareChain
                 consensus_manager,
                 genesis_block_hash,
                 stats_broadcast_client.clone(),
-                config.p2p_service.squad.clone(),
                 are_we_synced_with_randomx_p2pool.clone(),
                 are_we_synced_with_sha3x_p2pool.clone(),
+                p2p_service.squad.clone(),
             )
             .await?;
             p2pool_server = Some(ShaP2PoolServer::new(p2pool_grpc_service));

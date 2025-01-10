@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use human_format::Formatter;
+use libp2p::PeerId;
 use log::{debug, error, info};
 use serde::Serialize;
 use tari_core::proof_of_work::{Difficulty, PowAlgorithm};
@@ -22,6 +23,7 @@ pub(crate) struct StatsCollector {
     request_rx: tokio::sync::mpsc::Receiver<StatsRequest>,
     first_stat_received: Option<EpochTime>,
     last_squad: Option<String>,
+    local_peer_id: Option<PeerId>,
     miner_rx_accepted: u64,
     miner_sha_accepted: u64,
     // miner_rejected: u64,
@@ -55,6 +57,7 @@ impl StatsCollector {
             request_rx: rx,
             request_tx: tx,
             last_squad: None,
+            local_peer_id: None,
             first_stat_received: None,
             miner_rx_accepted: 0,
             miner_sha_accepted: 0,
@@ -89,8 +92,11 @@ impl StatsCollector {
 
     fn handle_stat(&mut self, sample: StatData) {
         match sample {
-            StatData::SquadChanged { squad, .. } => {
+            StatData::InfoChanged {
+                squad, local_peer_id, ..
+            } => {
                 self.last_squad = Some(squad);
+                self.local_peer_id = Some(local_peer_id);
             },
             StatData::MinerBlockAccepted { pow_algo, .. } => match pow_algo {
                 PowAlgorithm::Sha3x => {
@@ -240,8 +246,9 @@ impl StatsCollector {
                                         },
                                     }
                                 },
-                                Some(StatsRequest::GetLastGossipMessage(tx)) => {
-                                    let _ = tx.send(self.last_gossip_message).inspect_err(|e| error!(target: LOG_TARGET, "ShareChainError sending last gossip message: {:?}", e));
+                                Some(StatsRequest::GetLatestStats(tx)) => {
+                                    let res = (self.last_gossip_message, self.local_peer_id, self.last_squad.clone().unwrap_or_default());
+                                    let _res = tx.send(res).inspect_err(|e| error!(target: LOG_TARGET, "ShareChainError sending latest stats message: {:?}", e));
                                 },
                                 None => {
                                     break;
@@ -276,7 +283,7 @@ impl StatsCollector {
 
 pub(crate) enum StatsRequest {
     GetStats(PowAlgorithm, tokio::sync::oneshot::Sender<GetStatsResponse>),
-    GetLastGossipMessage(tokio::sync::oneshot::Sender<EpochTime>),
+    GetLatestStats(tokio::sync::oneshot::Sender<(EpochTime, Option<PeerId>, String)>),
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -289,8 +296,9 @@ pub(crate) struct GetStatsResponse {
 
 #[derive(Clone)]
 pub(crate) enum StatData {
-    SquadChanged {
+    InfoChanged {
         squad: String,
+        local_peer_id: PeerId,
         timestamp: EpochTime,
     },
     TargetDifficultyChanged {
@@ -338,7 +346,7 @@ pub(crate) enum StatData {
 impl StatData {
     pub fn timestamp(&self) -> EpochTime {
         match self {
-            StatData::SquadChanged { timestamp, .. } => *timestamp,
+            StatData::InfoChanged { timestamp, .. } => *timestamp,
             StatData::MinerBlockAccepted { timestamp, .. } => *timestamp,
             StatData::PoolBlockAccepted { timestamp, .. } => *timestamp,
             StatData::ChainChanged { timestamp, .. } => *timestamp,
@@ -363,9 +371,9 @@ impl StatsClient {
         Ok(rx.await?)
     }
 
-    pub async fn get_last_gossip_message(&self) -> Result<EpochTime, anyhow::Error> {
+    pub async fn get_stats_info(&self) -> Result<(EpochTime, Option<PeerId>, String), anyhow::Error> {
         let (tx, rx) = oneshot::channel();
-        self.request_tx.send(StatsRequest::GetLastGossipMessage(tx)).await?;
+        self.request_tx.send(StatsRequest::GetLatestStats(tx)).await?;
         Ok(rx.await?)
     }
 }
@@ -420,9 +428,10 @@ impl StatsBroadcastClient {
         self.broadcast(data)
     }
 
-    pub fn send_squad_changed(&self, squad: String) -> Result<(), anyhow::Error> {
-        let data = StatData::SquadChanged {
+    pub fn send_info_changed(&self, squad: String, local_peer_id: PeerId) -> Result<(), anyhow::Error> {
+        let data = StatData::InfoChanged {
             squad,
+            local_peer_id,
             timestamp: EpochTime::now(),
         };
         self.broadcast(data)

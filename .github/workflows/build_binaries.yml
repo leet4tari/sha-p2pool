@@ -180,6 +180,15 @@ jobs:
           # Should already be installed
           # choco upgrade strawberryperl -y
           choco upgrade protoc -y
+          #echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $GITHUB_ENV
+          # choco upgrade opencl-intel-cpu-runtime -y
+          vcpkg.exe --triplet=x64-windows install opencl
+          # Needed for openssl via vcpkg
+          vcpkg install openssl:x64-windows-static
+          echo "VCPKG_ROOT=C:\vcpkg" >> $GITHUB_ENV
+          echo "OPENSSL_DIR=C:\vcpkg\packages\openssl_x64-windows-static" >> $GITHUB_ENV
+          #echo "OPENSSL_STATIC=Yes" >> $GITHUB_ENV
+          #echo "VCPKGRS_DYNAMIC=1" >> $GITHUB_ENV
           rustup target add ${{ matrix.builds.target }}
 
       - name: Set environment variables - Nix

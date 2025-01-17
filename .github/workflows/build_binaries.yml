@@ -171,24 +171,12 @@ jobs:
       - name: Install Windows dependencies
         if: startsWith(runner.os,'Windows')
         run: |
-          vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
+          vcpkg.exe install sqlite3:x64-windows zlib:x64-windows openssl:x64-windows-static
           # Bug in choco - need to install each package individually
           choco upgrade llvm -y
-          # psutils is out of date
-          # choco upgrade psutils -y
-          choco upgrade openssl -y
-          # Should already be installed
-          # choco upgrade strawberryperl -y
           choco upgrade protoc -y
-          #echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $GITHUB_ENV
           # choco upgrade opencl-intel-cpu-runtime -y
           vcpkg.exe --triplet=x64-windows install opencl
-          # Needed for openssl via vcpkg
-          vcpkg install openssl:x64-windows-static
-          echo "VCPKG_ROOT=C:\vcpkg" >> $GITHUB_ENV
-          echo "OPENSSL_DIR=C:\vcpkg\packages\openssl_x64-windows-static" >> $GITHUB_ENV
-          #echo "OPENSSL_STATIC=Yes" >> $GITHUB_ENV
-          #echo "VCPKGRS_DYNAMIC=1" >> $GITHUB_ENV
           rustup target add ${{ matrix.builds.target }}
 
       - name: Set environment variables - Nix
@@ -240,9 +228,9 @@ jobs:
           echo "TS_DIST=\dist" >> $GITHUB_ENV
           echo "PLATFORM_SPECIFIC_DIR=windows" >> $GITHUB_ENV
           echo "SQLITE3_LIB_DIR=C:\vcpkg\installed\x64-windows\lib" >> $GITHUB_ENV
-          echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $GITHUB_ENV
           echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $GITHUB_ENV
-          echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
+          echo "VCPKG_ROOT=C:\vcpkg" >> $GITHUB_ENV
+          echo "OPENSSL_DIR=C:\vcpkg\packages\openssl_x64-windows-static" >> $GITHUB_ENV
 
       - name: Cache cargo files and outputs
         if: ${{ ( ! startsWith(github.ref, 'refs/tags/v') ) && ( ! matrix.builds.cross ) && ( env.CARGO_CACHE ) }}
